@@ -10,7 +10,9 @@ import {
 import { getTemporaryVault } from 'obsidian-integration-testing/vitest-global-setup-plugin';
 import {
   afterAll,
+  afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it
@@ -22,6 +24,25 @@ const vault = getTemporaryVault();
 
 interface Context {
   markdownView: MarkdownView;
+}
+
+interface HistoryDiagnostics {
+  documentStates: Map<Document, HistoryDiagnosticState>;
+}
+
+interface HistoryDiagnosticStart {
+  before: string;
+}
+
+interface HistoryDiagnosticState {
+  lastPropertyEdit: HistoryDiagnosticTransaction | null;
+  propertyEditCommitPending: boolean;
+  propertyEditDraft: HistoryDiagnosticTransaction | null;
+  propertyEditStart: HistoryDiagnosticStart | null;
+}
+
+interface HistoryDiagnosticTransaction extends HistoryDiagnosticStart {
+  after: string;
 }
 
 interface PropertyVisualSettings {
@@ -64,16 +85,20 @@ Body
 `;
 }
 
-beforeAll(async () => {
+beforeAll(() => {
   vault.populate({
     [TEST_NOTE_PATH]: createLongFrontmatter()
   });
+});
+
+beforeEach(async () => {
   await evalInObsidian({
-    callback: async ({ app, context, lib: { waitUntil } }) => {
+    callback: async ({ app, context, fixture, lib: { waitUntil } }) => {
       const file = app.vault.getFileByPath('property-field-visuals.md');
       if (file === null) {
         throw new Error('Property visuals fixture was not found');
       }
+      await app.vault.modify(file, fixture);
       const leaf = app.workspace.getLeaf(true);
       await leaf.setViewState({
         state: {
@@ -95,6 +120,17 @@ beforeAll(async () => {
       });
     },
     contextId,
+    input: { fixture: createLongFrontmatter() },
+    vaultPath: vault.path
+  });
+});
+
+afterEach(async () => {
+  await evalInObsidian({
+    callback: ({ context: { markdownView } }) => {
+      markdownView.leaf.detach();
+    },
+    contextId,
     vaultPath: vault.path
   });
 });
@@ -106,7 +142,7 @@ afterAll(async () => {
 describe('property-field visuals in real Obsidian', () => {
   it('owns a committed Live Preview property undo and redo without changing scroll', async () => {
     const result = await evalInObsidian({
-      callback: async ({ context: { markdownView }, lib: { clickElement, pressKey, waitUntil } }) => {
+      callback: async ({ app, context: { markdownView }, lib: { clickElement, pressKey, waitUntil } }) => {
         const ownerDocument = markdownView.containerEl.ownerDocument;
         const sourceView = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view.is-live-preview');
         const focusExitTarget = markdownView.leaf.containerEl.querySelector<HTMLElement>('.view-header-title-container, .view-header');
@@ -152,11 +188,63 @@ describe('property-field visuals in real Obsidian', () => {
           return maximumDelta;
         }
 
+        let didUndoReachDocument = false;
+        let undoEventKey: null | string = null;
+        let wasUndoDefaultPrevented: boolean | null = null;
+        function recordUndoAtWindow(event: KeyboardEvent): void {
+          if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+            ownerDocument.defaultView?.setTimeout(() => {
+              undoEventKey = event.key;
+              wasUndoDefaultPrevented = event.defaultPrevented;
+            }, 0);
+          }
+        }
+        function recordUndoAtDocument(event: KeyboardEvent): void {
+          if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+            didUndoReachDocument = true;
+          }
+        }
+        ownerDocument.defaultView?.addEventListener('keydown', recordUndoAtWindow, { capture: true });
+        ownerDocument.addEventListener('keydown', recordUndoAtDocument, { capture: true });
+        const activeElementBeforeUndo = ownerDocument.activeElement;
+        function snapshotHistory(): string {
+          const plugin = app.plugins.getPlugin('nested-properties-advanced');
+          const diagnostics = plugin?._children.find((child) => 'documentStates' in child) as HistoryDiagnostics | undefined;
+          const history = diagnostics?.documentStates.get(ownerDocument);
+          return JSON.stringify({
+            committedAfter: history?.lastPropertyEdit?.after.split('\n', 2)[1],
+            committedBefore: history?.lastPropertyEdit?.before.split('\n', 2)[1],
+            draftAfter: history?.propertyEditDraft?.after.split('\n', 2)[1],
+            pending: history?.propertyEditCommitPending,
+            startBefore: history?.propertyEditStart?.before.split('\n', 2)[1]
+          });
+        }
+        const historyBeforeUndo = snapshotHistory();
         pressKey({ key: 'z', modifiers: ['Ctrl'] });
-        await waitUntil({
-          message: 'Ctrl+Z did not undo the committed property edit',
-          predicate: () => markdownView.editor.getValue().includes('historyRoot: original')
-        });
+        try {
+          await waitUntil({
+            message: 'Ctrl+Z did not undo the committed property edit',
+            predicate: () => markdownView.editor.getValue().includes('historyRoot: original')
+          });
+        } catch (error) {
+          throw new Error(
+            `${String(error)}; shortcut diagnostics: ${
+              JSON.stringify({
+                activeElementClass: activeElementBeforeUndo?.className ?? '',
+                activeElementTag: activeElementBeforeUndo?.tagName ?? '',
+                currentFirstPropertyLine: markdownView.editor.getValue().split('\n', 2)[1] ?? '',
+                defaultPrevented: wasUndoDefaultPrevented,
+                eventKey: undoEventKey,
+                historyBeforeUndo,
+                reachedDocument: didUndoReachDocument
+              })
+            }`,
+            { cause: error }
+          );
+        } finally {
+          ownerDocument.defaultView?.removeEventListener('keydown', recordUndoAtWindow, { capture: true });
+          ownerDocument.removeEventListener('keydown', recordUndoAtDocument, { capture: true });
+        }
         const maximumUndoScrollDelta = await measureMaximumScrollDelta();
         const scrollTopAfterUndo = activeScroller.scrollTop;
 
