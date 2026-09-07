@@ -148,7 +148,7 @@ interface VisualMutation {
 export class PropertyFieldVisualsComponent extends Component {
   private readonly app: App;
   private readonly codeMirrorViews = new Set<EditorView>();
-  private readonly propertyHistoryScrollViews = new WeakSet<EditorView>();
+  private readonly propertyHistoryScrollViews = new Set<EditorView>();
   private readonly containerRenderSnapshots = new WeakMap<HTMLElement, ContainerRenderSnapshot>();
   private readonly documentStates = new Map<Document, DocumentState>();
   private readonly pluginSettingsComponent: PluginSettingsComponent;
@@ -250,6 +250,7 @@ export class PropertyFieldVisualsComponent extends Component {
       removeVisualArtifacts(ownerDocument);
     }
     this.codeMirrorViews.clear();
+    this.propertyHistoryScrollViews.clear();
     this.documentStates.clear();
     super.onunload();
   }
@@ -429,6 +430,7 @@ export class PropertyFieldVisualsComponent extends Component {
 
   private unregisterCodeMirrorView(view: EditorView): void {
     this.codeMirrorViews.delete(view);
+    this.propertyHistoryScrollViews.delete(view);
     const sourceView = getCodeMirrorSourceView(view);
     if (sourceView !== null && [...this.codeMirrorViews].every((candidate) => getCodeMirrorSourceView(candidate) !== sourceView)) {
       removeSourceViewVisualArtifacts(sourceView);
@@ -611,7 +613,7 @@ export class PropertyFieldVisualsComponent extends Component {
     }
     const hadBreadcrumbTarget = state.hoveredBreadcrumbField !== null;
     state.hoveredBreadcrumbField = null;
-    if (hadBreadcrumbTarget && state.popover !== null) {
+    if ((hadBreadcrumbTarget || dismissImmediately) && state.popover !== null) {
       if (dismissImmediately) {
         this.dismissPopover(state);
       } else {
@@ -678,7 +680,7 @@ export class PropertyFieldVisualsComponent extends Component {
     const breadcrumbNode = breadcrumbElement === null ? undefined : nodes.find((candidate) => candidate.element === breadcrumbElement);
     const threadingNode = threadingElement === null ? undefined : nodes.find((candidate) => candidate.element === threadingElement);
 
-    if (isBreadcrumbChanged) {
+    if (isBreadcrumbChanged || (breadcrumbElement === null && state.popover !== null)) {
       state.hoveredBreadcrumbField = breadcrumbNode === undefined ? null : breadcrumbElement;
       if (breadcrumbNode === undefined) {
         if (state.popover !== null) {
@@ -723,7 +725,7 @@ export class PropertyFieldVisualsComponent extends Component {
     threadingLine: HTMLElement | null
   ): void {
     const isBreadcrumbChanged = state.hoveredBreadcrumbField !== breadcrumbLine;
-    if (isBreadcrumbChanged) {
+    if (isBreadcrumbChanged || (breadcrumbLine === null && state.popover !== null)) {
       state.hoveredBreadcrumbField = breadcrumbLine;
       if (breadcrumbLine === null) {
         if (state.popover !== null) {
@@ -791,7 +793,7 @@ export class PropertyFieldVisualsComponent extends Component {
   }
 
   private clearPropertyHistoryScroll(ownerDocument: Document): void {
-    for (const view of this.codeMirrorViews) {
+    for (const view of this.propertyHistoryScrollViews) {
       if (view.dom.ownerDocument === ownerDocument) {
         this.propertyHistoryScrollViews.delete(view);
       }

@@ -537,6 +537,9 @@ describe('property field visual render guards', () => {
     // Obsidian themes can make the SVG itself pointer-transparent, leaving the key as the event target.
     key.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 20, clientY: 30 }));
     expect(state.hoveredBreadcrumbField).toBe(property);
+    state.popover?.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 1000, clientY: 200 }));
+    expect(state.hoveredBreadcrumbField).toBeNull();
+    expect(state.popover).not.toBeNull();
     key.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 100, clientY: 30 }));
     expect(state.hoveredBreadcrumbField).toBeNull();
     expect(state.popover).toBeNull();

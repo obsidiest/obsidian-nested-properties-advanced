@@ -138,10 +138,10 @@ afterAll(async () => {
 describe('property-field visuals in real Obsidian', () => {
   it.each(HISTORY_CASES.flatMap((historyCase) => ['blur', 'Escape'].map((exit) => ({ ...historyCase, exit }))))('routes native $key $kind history after $exit without changing scroll', async (historyCase) => {
     const result = await evalInObsidian({
-      callback: async ({ context: { markdownView }, historyCase: testCase, lib: { clickElement, pressKey, waitUntil } }) => {
+      callback: async ({ context: { markdownView }, historyCase: testCase, lib: { clickElement, clickMouse, pressKey, waitUntil } }) => {
         const ownerDocument = markdownView.containerEl.ownerDocument;
         const sourceView = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view.is-live-preview');
-        const focusExitTarget = markdownView.leaf.containerEl.querySelector<HTMLElement>('.view-header-title-container, .view-header');
+        const focusExitTarget = markdownView.leaf.containerEl.querySelector<HTMLElement>('.view-header');
         const inputs = [...markdownView.containerEl.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')];
         const keyInput = inputs.find((candidate) => candidate.value === testCase.key);
         const input = testCase.kind === 'key' ? keyInput : keyInput?.closest('.metadata-property')?.querySelector<HTMLElement>(':scope > .metadata-property-value input, :scope > .metadata-property-value textarea, :scope > .metadata-property-value [contenteditable="true"]');
@@ -165,20 +165,21 @@ describe('property-field visuals in real Obsidian', () => {
           predicate: () => (input.instanceOf(HTMLInputElement) || input.instanceOf(HTMLTextAreaElement) ? input.value : input.textContent) === testCase.text
         });
         if (testCase.exit === 'Escape') {
-          if (testCase.kind === 'key') {
-            // Native key Escape cancels uncommitted text. Enter commits first; Escape then
-            // Leaves the replacement/value control reached during the metadata focus handoff.
-            pressKey({ key: 'Enter' });
-            await waitUntil({ message: 'Enter did not commit the property key', predicate: () => markdownView.editor.getValue().includes(testCase.after) });
-            await new Promise<void>((resolve) => {
-              ownerDocument.defaultView?.requestAnimationFrame(() => {
-                resolve();
-              });
+          // Native key and text-value Escape cancel uncommitted text. Enter commits first;
+          // Escape then leaves the control reached during the metadata focus handoff.
+          pressKey({ key: 'Enter' });
+          await waitUntil({ message: 'Enter did not commit the property edit', predicate: () => markdownView.editor.getValue().includes(testCase.after) });
+          await new Promise<void>((resolve) => {
+            ownerDocument.defaultView?.requestAnimationFrame(() => {
+              resolve();
             });
-          }
+          });
           pressKey({ key: 'Escape' });
         } else {
-          clickElement({ element: focusExitTarget });
+          // The title itself is contenteditable. Use the header's outer padding so focus
+          // Leaves the property without starting a file rename or collapsing Properties.
+          const exitRect = focusExitTarget.getBoundingClientRect();
+          clickMouse({ x: exitRect.left + 2, y: exitRect.top + 2 });
         }
         await waitUntil({ message: 'Focus did not leave the property input', predicate: () => !ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]') });
         await waitUntil({
