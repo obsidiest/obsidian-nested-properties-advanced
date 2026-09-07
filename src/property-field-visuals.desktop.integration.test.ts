@@ -26,24 +26,20 @@ interface Context {
   markdownView: MarkdownView;
 }
 
-interface HistoryDiagnostics {
-  documentStates: Map<Document, HistoryDiagnosticState>;
-}
-
-interface HistoryDiagnosticStart {
-  before: string;
-}
-
-interface HistoryDiagnosticState {
-  lastPropertyEdit: HistoryDiagnosticTransaction | null;
-  propertyEditCommitPending: boolean;
-  propertyEditDraft: HistoryDiagnosticTransaction | null;
-  propertyEditStart: HistoryDiagnosticStart | null;
-}
-
-interface HistoryDiagnosticTransaction extends HistoryDiagnosticStart {
+interface HistoryCase {
   after: string;
+  before: string;
+  key: string;
+  kind: string;
+  text: string;
 }
+
+const HISTORY_CASES: HistoryCase[] = [
+  { after: 'historyRootRenamed: original', before: 'historyRoot: original', key: 'historyRoot', kind: 'key', text: 'historyRootRenamed' },
+  { after: 'historyRoot: changed', before: 'historyRoot: original', key: 'historyRoot', kind: 'value', text: 'changed' },
+  { after: 'leafRenamed: value', before: 'leaf: value', key: 'leaf', kind: 'key', text: 'leafRenamed' },
+  { after: 'leaf: changed', before: 'leaf: value', key: 'leaf', kind: 'value', text: 'changed' }
+];
 
 interface PropertyVisualSettings {
   isActiveCursorPropertyFieldThreadingEnabled: boolean;
@@ -140,15 +136,16 @@ afterAll(async () => {
 });
 
 describe('property-field visuals in real Obsidian', () => {
-  it('owns a committed Live Preview property undo and redo without changing scroll', async () => {
+  it.each(HISTORY_CASES.flatMap((historyCase) => ['blur', 'Escape'].map((exit) => ({ ...historyCase, exit }))))('routes native $key $kind history after $exit without changing scroll', async (historyCase) => {
     const result = await evalInObsidian({
-      callback: async ({ app, context: { markdownView }, lib: { clickElement, pressKey, waitUntil } }) => {
+      callback: async ({ context: { markdownView }, historyCase: testCase, lib: { clickElement, pressKey, waitUntil } }) => {
         const ownerDocument = markdownView.containerEl.ownerDocument;
         const sourceView = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view.is-live-preview');
         const focusExitTarget = markdownView.leaf.containerEl.querySelector<HTMLElement>('.view-header-title-container, .view-header');
         const inputs = [...markdownView.containerEl.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')];
-        const input = inputs.find((candidate) => candidate.value === 'historyRoot');
-        if (sourceView === null || focusExitTarget === null || input === undefined) {
+        const keyInput = inputs.find((candidate) => candidate.value === testCase.key);
+        const input = testCase.kind === 'key' ? keyInput : keyInput?.closest('.metadata-property')?.querySelector<HTMLElement>(':scope > .metadata-property-value input, :scope > .metadata-property-value textarea, :scope > .metadata-property-value [contenteditable="true"]');
+        if (sourceView === null || focusExitTarget === null || input === undefined || input === null) {
           throw new Error('Live Preview history fixture did not render');
         }
         const scroller = sourceView.querySelector<HTMLElement>('.cm-scroller');
@@ -160,22 +157,33 @@ describe('property-field visuals in real Obsidian', () => {
         activeScroller.scrollTop = 0;
         clickElement({ element: input });
         pressKey({ key: 'a', modifiers: ['Ctrl'] });
-        for (const character of 'historyRootRenamed') {
+        for (const character of testCase.text) {
           pressKey({ key: character });
         }
         await waitUntil({
-          message: 'Trusted input did not finish renaming the property key',
-          predicate: () => input.value === 'historyRootRenamed'
+          message: 'Trusted input did not finish editing the property',
+          predicate: () => (input.instanceOf(HTMLInputElement) || input.instanceOf(HTMLTextAreaElement) ? input.value : input.textContent) === testCase.text
         });
-        const historyDuringEditing = snapshotHistory();
-        clickElement({ element: focusExitTarget });
+        if (testCase.exit === 'Escape') {
+          if (testCase.kind === 'key') {
+            // Native key Escape cancels uncommitted text. Enter commits first; Escape then
+            // Leaves the replacement/value control reached during the metadata focus handoff.
+            pressKey({ key: 'Enter' });
+            await waitUntil({ message: 'Enter did not commit the property key', predicate: () => markdownView.editor.getValue().includes(testCase.after) });
+            await new Promise<void>((resolve) => {
+              ownerDocument.defaultView?.requestAnimationFrame(() => {
+                resolve();
+              });
+            });
+          }
+          pressKey({ key: 'Escape' });
+        } else {
+          clickElement({ element: focusExitTarget });
+        }
+        await waitUntil({ message: 'Focus did not leave the property input', predicate: () => !ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]') });
         await waitUntil({
-          message: 'Trusted click did not leave the property editor',
-          predicate: () => ownerDocument.activeElement?.closest('.metadata-container') === null
-        });
-        await waitUntil({
-          message: 'Property-key edit did not commit after leaving the field',
-          predicate: () => markdownView.editor.getValue().includes('historyRootRenamed: original')
+          message: 'Property edit did not commit after leaving the field',
+          predicate: () => markdownView.editor.getValue().includes(testCase.after)
         });
         const scrollTopBeforeHistory = activeScroller.scrollTop;
         async function measureMaximumScrollDelta(): Promise<number> {
@@ -189,74 +197,18 @@ describe('property-field visuals in real Obsidian', () => {
           return maximumDelta;
         }
 
-        let didUndoReachDocument = false;
-        let undoEventKey: null | string = null;
-        let wasUndoDefaultPrevented: boolean | null = null;
-        function recordUndoAtWindow(event: KeyboardEvent): void {
-          if (event.ctrlKey && event.key.toLowerCase() === 'z') {
-            ownerDocument.defaultView?.setTimeout(() => {
-              undoEventKey = event.key;
-              wasUndoDefaultPrevented = event.defaultPrevented;
-            }, 0);
-          }
-        }
-        function recordUndoAtDocument(event: KeyboardEvent): void {
-          if (event.ctrlKey && event.key.toLowerCase() === 'z') {
-            didUndoReachDocument = true;
-          }
-        }
-        ownerDocument.defaultView?.addEventListener('keydown', recordUndoAtWindow, { capture: true });
-        ownerDocument.addEventListener('keydown', recordUndoAtDocument, { capture: true });
-        const activeElementBeforeUndo = ownerDocument.activeElement;
-        function snapshotHistory(): string {
-          const plugin = app.plugins.getPlugin('nested-properties-advanced');
-          const diagnostics = plugin?._children.flatMap((child) => [child, ...child._children]).find((child) => 'documentStates' in child) as HistoryDiagnostics | undefined;
-          const history = diagnostics?.documentStates.get(ownerDocument);
-          if (history === undefined) {
-            throw new Error('Live property-history diagnostics were not found in the plugin component tree');
-          }
-          return JSON.stringify({
-            committedAfter: history.lastPropertyEdit?.after.split('\n', 2)[1],
-            committedBefore: history.lastPropertyEdit?.before.split('\n', 2)[1],
-            draftAfter: history.propertyEditDraft?.after.split('\n', 2)[1],
-            pending: history.propertyEditCommitPending,
-            startBefore: history.propertyEditStart?.before.split('\n', 2)[1]
-          });
-        }
-        const historyBeforeUndo = snapshotHistory();
         pressKey({ key: 'z', modifiers: ['Ctrl'] });
-        try {
-          await waitUntil({
-            message: 'Ctrl+Z did not undo the committed property edit',
-            predicate: () => markdownView.editor.getValue().includes('historyRoot: original')
-          });
-        } catch (error) {
-          throw new Error(
-            `${String(error)}; shortcut diagnostics: ${
-              JSON.stringify({
-                activeElementClass: activeElementBeforeUndo?.className ?? '',
-                activeElementTag: activeElementBeforeUndo?.tagName ?? '',
-                currentFirstPropertyLine: markdownView.editor.getValue().split('\n', 2)[1] ?? '',
-                defaultPrevented: wasUndoDefaultPrevented,
-                eventKey: undoEventKey,
-                historyBeforeUndo,
-                historyDuringEditing,
-                reachedDocument: didUndoReachDocument
-              })
-            }`,
-            { cause: error }
-          );
-        } finally {
-          ownerDocument.defaultView?.removeEventListener('keydown', recordUndoAtWindow, { capture: true });
-          ownerDocument.removeEventListener('keydown', recordUndoAtDocument, { capture: true });
-        }
+        await waitUntil({
+          message: 'Ctrl+Z did not undo the committed property edit',
+          predicate: () => markdownView.editor.getValue().includes(testCase.before)
+        });
         const maximumUndoScrollDelta = await measureMaximumScrollDelta();
         const scrollTopAfterUndo = activeScroller.scrollTop;
 
         pressKey({ key: 'y', modifiers: ['Ctrl'] });
         await waitUntil({
-          message: 'Ctrl+Y did not redo the escaped property edit',
-          predicate: () => markdownView.editor.getValue().includes('historyRootRenamed: original')
+          message: 'Ctrl+Y did not redo the committed property edit',
+          predicate: () => markdownView.editor.getValue().includes(testCase.after)
         });
         const maximumRedoScrollDelta = await measureMaximumScrollDelta();
         const scrollTopAfterRedo = activeScroller.scrollTop;
@@ -271,6 +223,7 @@ describe('property-field visuals in real Obsidian', () => {
         };
       },
       contextId,
+      input: { historyCase },
       vaultPath: vault.path
     });
 

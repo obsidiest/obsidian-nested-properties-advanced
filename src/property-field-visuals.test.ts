@@ -1,3 +1,12 @@
+import {
+  history,
+  redo,
+  undo
+} from '@codemirror/commands';
+import {
+  EditorState,
+  Transaction
+} from '@codemirror/state';
 import { castTo } from 'obsidian-dev-utils/object-utils';
 import {
   describe,
@@ -23,6 +32,7 @@ import {
   getThreadDepthColorIndex,
   hideSourceViewOverlay,
   isContainerRenderCurrent,
+  isFrontmatterOnlyChange,
   isPropertyFieldMutation,
   isPropertyVisualStyleMutation,
   isRedoShortcut,
@@ -49,18 +59,6 @@ interface TestActiveField {
   kind: string;
 }
 
-interface TestCodeMirrorChange {
-  changes: TestCodeMirrorChangeRange;
-  scrollIntoView: boolean;
-  selection: unknown;
-}
-
-interface TestCodeMirrorChangeRange {
-  from: number;
-  insert: string;
-  to: number;
-}
-
 interface TestDocumentLine {
   number: number;
 }
@@ -72,16 +70,10 @@ interface TestDocumentState {
   hideTimer: null;
   hoveredBreadcrumbField: HTMLElement | null;
   hoveredThreadingField: HTMLElement | null;
-  isApplyingPropertyHistory: boolean;
-  lastPropertyEdit: unknown;
   lastPropertyEditorView: unknown;
   metadataContainerCleanups: Map<HTMLElement, () => void>;
   mutationObserver: MutationObserver | null;
   popover: HTMLElement | null;
-  propertyEditCaptureTimer: null;
-  propertyEditCommitPending: boolean;
-  propertyEditDraft: unknown;
-  propertyEditStart: unknown;
   renderedContainers: Set<HTMLElement>;
   renderedSourceViews: Set<HTMLElement>;
   renderFrame: null;
@@ -98,11 +90,6 @@ interface TestDocumentTextLine {
 interface TestEditorPosition {
   ch: number;
   line: number;
-}
-
-interface TestMeasureRequest {
-  read(): unknown;
-  write?(value: unknown): void;
 }
 
 interface TestPointerCoordinates {
@@ -323,16 +310,10 @@ describe('property field visual render guards', () => {
       hideTimer: null,
       hoveredBreadcrumbField: null,
       hoveredThreadingField: null,
-      isApplyingPropertyHistory: false,
-      lastPropertyEdit: null,
       lastPropertyEditorView: null,
       metadataContainerCleanups: new Map(),
       mutationObserver: null,
       popover: null,
-      propertyEditCaptureTimer: null,
-      propertyEditCommitPending: false,
-      propertyEditDraft: null,
-      propertyEditStart: null,
       renderedContainers: new Set(),
       renderedSourceViews: new Set(),
       renderFrame: null,
@@ -682,159 +663,40 @@ describe('property field visual render guards', () => {
     expect(computeTextReplacement(before, before)).toBeNull();
   });
 
-  it('should retain an escaped Live Preview edit through metadata focus handoffs and own both history directions without scrolling', () => {
-    vi.useFakeTimers();
-    const settings = new PluginSettings();
-    const component = castTo<TestPropertyFieldVisualsComponent>(
-      new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
-        app: { workspace: { layoutReady: false } },
-        pluginSettingsComponent: { settings }
-      }))
-    );
-    const before = '---\nroot: before\n---';
-    const after = '---\nroot: after\n---';
-    let value = after;
-    const containerEl = document.body.createDiv({ cls: ['markdown-source-view', 'is-live-preview'] });
-    const metadataContainer = containerEl.createDiv({ cls: 'metadata-container' });
-    const property = metadataContainer.createDiv({ cls: 'metadata-property' });
-    const propertyInput = property.createEl('input');
-    const editorContent = containerEl.createDiv({ attr: { contenteditable: 'true' }, cls: 'cm-content' });
-    propertyInput.focus();
-    const view = {
-      containerEl,
-      editor: {
-        getValue: (): string => value,
-        redo: vi.fn(),
-        undo: vi.fn()
-      }
-    };
-    const preservedSelection = { main: { anchor: 0, head: 0 } };
-    const dispatch = vi.fn((transaction: TestCodeMirrorChange): void => {
-      const { from, insert, to } = transaction.changes;
-      value = value.slice(0, from) + insert + value.slice(to);
+  it('uses native history when a Live Preview filter rejects ordinary frontmatter replay', () => {
+    const before = '---\nroot: before\n---\nBody';
+    const after = '---\nroot: after\n---\nBody';
+    let state = EditorState.create({
+      doc: before,
+      extensions: [
+        history(),
+        EditorState.transactionFilter.of((transaction) => transaction.docChanged && !transaction.isUserEvent('set') ? [] : transaction)
+      ]
     });
-    const scrollDOM = containerEl.createDiv();
-    scrollDOM.scrollTop = 96;
-    scrollDOM.scrollLeft = 7;
-    const codeMirrorView = {
-      contentDOM: containerEl,
-      dispatch,
-      dom: containerEl,
-      requestMeasure: vi.fn((request: TestMeasureRequest): void => request.write?.(request.read())),
-      scrollDOM,
-      state: {
-        doc: {
-          toString: (): string => value
-        },
-        selection: preservedSelection
-      }
-    };
-    const state = castTo<TestDocumentState>({
-      active: null,
-      bodyStyleObserver: null,
-      cleanups: [],
-      hideTimer: null,
-      hoveredBreadcrumbField: null,
-      hoveredThreadingField: null,
-      isApplyingPropertyHistory: false,
-      lastPropertyEdit: null,
-      lastPropertyEditorView: view,
-      metadataContainerCleanups: new Map(),
-      mutationObserver: null,
-      popover: null,
-      propertyEditCaptureTimer: null,
-      propertyEditCommitPending: false,
-      propertyEditDraft: null,
-      propertyEditStart: { before, view },
-      renderedContainers: new Set(),
-      renderedSourceViews: new Set(),
-      renderFrame: null,
-      renderGeneration: 0,
-      sourceHighlight: null,
-      sourceModeObservers: new Map()
+    state = state.update({ changes: { from: 10, insert: 'after', to: 16 }, userEvent: 'set' }).state;
+    expect(state.doc.toString()).toBe(after);
+    const rejectedReplay = state.update({
+      annotations: Transaction.addToHistory.of(false),
+      changes: { from: 10, insert: 'before', to: 15 },
+      scrollIntoView: false
     });
-    component.documentStates.set(document, state);
-    component.codeMirrorViews.add(codeMirrorView);
-    component.findMarkdownView = (): unknown => view;
+    expect(rejectedReplay.docChanged).toBe(false);
 
-    component.onCodeMirrorUpdate(castTo({
-      docChanged: true,
-      focusChanged: false,
-      geometryChanged: false,
-      selectionSet: false,
-      transactions: [],
-      view: codeMirrorView,
-      viewportChanged: false
-    }));
-    expect(state.propertyEditDraft).toMatchObject({ after, before, view });
-    expect(state.lastPropertyEdit).toBeNull();
+    function dispatch(transaction: Transaction): void {
+      expect(isFrontmatterOnlyChange(transaction)).toBe(true);
+      state = transaction.state;
+    }
+    expect(undo({ dispatch, state })).toBe(true);
+    expect(state.doc.toString()).toBe(before);
+    expect(redo({ dispatch, state })).toBe(true);
+    expect(state.doc.toString()).toBe(after);
+  });
 
-    component.onKeyDown(document, castTo<KeyboardEvent>({ altKey: false, ctrlKey: false, key: 'Escape', metaKey: false, repeat: false, shiftKey: false, target: propertyInput }));
-    expect(state.lastPropertyEdit).toMatchObject({ after, before, view });
-    component.onFocusOut(document, castTo<FocusEvent>({ relatedTarget: editorContent, target: propertyInput }));
-    // Obsidian replaces/refocuses metadata controls as the edit commits.
-    // Previously, this event discarded the captured transaction before Ctrl+Z reached the document.
-    component.onFocusIn(document, castTo<FocusEvent>({ target: propertyInput }));
-    expect(state.propertyEditStart).toMatchObject({ before: after, view });
-    expect(state.lastPropertyEdit).toMatchObject({ after, before, view });
-    editorContent.focus();
-    const undoPreventDefault = vi.fn();
-    const undoStopImmediatePropagation = vi.fn();
-    component.onKeyDown(
-      document,
-      castTo<KeyboardEvent>({
-        altKey: false,
-        ctrlKey: true,
-        key: 'z',
-        metaKey: false,
-        preventDefault: undoPreventDefault,
-        repeat: false,
-        shiftKey: false,
-        stopImmediatePropagation: undoStopImmediatePropagation,
-        target: editorContent
-      })
-    );
-    expect(value).toBe(before);
-    expect(undoPreventDefault).toHaveBeenCalledTimes(1);
-    expect(undoStopImmediatePropagation).toHaveBeenCalledTimes(1);
-    expect(scrollDOM.scrollTop).toBe(96);
-    expect(scrollDOM.scrollLeft).toBe(7);
-    component.onFocusIn(document, castTo<FocusEvent>({ target: propertyInput }));
-    expect(state.lastPropertyEdit).toMatchObject({ after, before, view });
-    editorContent.focus();
-    const redoPreventDefault = vi.fn();
-    const redoStopImmediatePropagation = vi.fn();
-    component.onKeyDown(
-      document,
-      castTo<KeyboardEvent>({
-        altKey: false,
-        ctrlKey: true,
-        key: 'y',
-        metaKey: false,
-        preventDefault: redoPreventDefault,
-        repeat: false,
-        shiftKey: false,
-        stopImmediatePropagation: redoStopImmediatePropagation,
-        target: editorContent
-      })
-    );
-    vi.runAllTimers();
-
-    expect(view.editor.undo).not.toHaveBeenCalled();
-    expect(view.editor.redo).not.toHaveBeenCalled();
-    expect(dispatch).toHaveBeenCalledTimes(2);
-    expect(dispatch.mock.calls[0]?.[0]).toMatchObject({ scrollIntoView: false, selection: preservedSelection });
-    expect(dispatch.mock.calls[1]?.[0]).toMatchObject({ scrollIntoView: false, selection: preservedSelection });
-    expect(redoPreventDefault).toHaveBeenCalledTimes(1);
-    expect(redoStopImmediatePropagation).toHaveBeenCalledTimes(1);
-    expect(value).toBe(after);
-    expect(scrollDOM.scrollTop).toBe(96);
-    expect(scrollDOM.scrollLeft).toBe(7);
-
-    component.codeMirrorViews.clear();
-    component.documentStates.delete(document);
-    containerEl.remove();
-    vi.useRealTimers();
+  it('limits history scroll suppression to changes within frontmatter, leaving body history native', () => {
+    const state = EditorState.create({ doc: '---\nroot: before\n---\nBody' });
+    expect(isFrontmatterOnlyChange(state.update({ changes: { from: 10, insert: 'after', to: 16 } }))).toBe(true);
+    expect(isFrontmatterOnlyChange(state.update({ changes: { from: state.doc.length, insert: ' text' } }))).toBe(false);
+    expect(isFrontmatterOnlyChange(state.update({ changes: { from: 0, insert: 'prefix' } }))).toBe(false);
   });
 
   it('should map a virtualized Source line through CodeMirror rather than matching its text', () => {

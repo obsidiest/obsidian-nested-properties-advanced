@@ -1,14 +1,16 @@
 /* v8 ignore file -- Integration behavior depends on Obsidian's live metadata-editor and CodeMirror DOM. */
 /* eslint-disable @typescript-eslint/array-type, @typescript-eslint/no-confusing-void-expression, @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, complexity, import-x/consistent-type-specifier-style, no-magic-numbers, no-restricted-syntax, obsidian-dev-utils/params-options-name-match, obsidian-dev-utils/readonly-params-options-result-members, perfectionist/sort-classes, perfectionist/sort-modules, perfectionist/sort-union-types, unicorn/consistent-boolean-name, unicorn/no-array-callback-reference, unicorn/no-nested-ternary, unicorn/no-unnecessary-nested-ternary, unicorn/prefer-spread -- The component mirrors and traverses Obsidian's cross-window DOM; local callback and ordering rules would obscure the event-flow implementation. */
-import type { Extension } from '@codemirror/state';
 import type {
-  EditorView,
-  ViewUpdate
-} from '@codemirror/view';
+  Extension,
+  Text
+} from '@codemirror/state';
+import type { ViewUpdate } from '@codemirror/view';
 import type { App } from 'obsidian';
 
-import { Transaction } from '@codemirror/state';
-import { ViewPlugin } from '@codemirror/view';
+import {
+  EditorView,
+  ViewPlugin
+} from '@codemirror/view';
 import {
   Component,
   MarkdownView
@@ -30,7 +32,6 @@ import {
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const POPOVER_HIDE_DELAY_IN_MILLISECONDS = 120;
-const PROPERTY_EDIT_CAPTURE_DELAYS_IN_MILLISECONDS = [0, 40, 120, 240] as const;
 const OWNED_VISUAL_SELECTOR = '.np-property-tree-overlay, .np-property-source-overlay, .np-property-breadcrumb-popover';
 const METADATA_CONTAINER_SELECTOR = '.metadata-container';
 const SOURCE_FOLD_CONTROL_SELECTOR = '.collapse-indicator, .cm-foldMarker, .cm-fold-indicator, [aria-label*="fold" i]';
@@ -68,16 +69,10 @@ interface DocumentState {
   hideTimer: number | null;
   hoveredBreadcrumbField: HTMLElement | null;
   hoveredThreadingField: HTMLElement | null;
-  isApplyingPropertyHistory: boolean;
-  lastPropertyEdit: PropertyEditTransaction | null;
   lastPropertyEditorView: MarkdownView | null;
   metadataContainerCleanups: Map<HTMLElement, () => void>;
   mutationObserver: MutationObserver | null;
   popover: HTMLElement | null;
-  propertyEditCaptureTimer: number | null;
-  propertyEditCommitPending: boolean;
-  propertyEditDraft: PropertyEditTransaction | null;
-  propertyEditStart: PropertyEditStart | null;
   renderedContainers: Set<HTMLElement>;
   renderedSourceViews: Set<HTMLElement>;
   renderFrame: number | null;
@@ -96,15 +91,6 @@ export interface ContainerRenderSnapshot {
 interface PropertyFieldVisualsComponentParams {
   app: App;
   pluginSettingsComponent: PluginSettingsComponent;
-}
-
-interface PropertyEditStart {
-  before: string;
-  view: MarkdownView;
-}
-
-interface PropertyEditTransaction extends PropertyEditStart {
-  after: string;
 }
 
 export interface TextReplacement {
@@ -162,6 +148,7 @@ interface VisualMutation {
 export class PropertyFieldVisualsComponent extends Component {
   private readonly app: App;
   private readonly codeMirrorViews = new Set<EditorView>();
+  private readonly propertyHistoryScrollViews = new WeakSet<EditorView>();
   private readonly containerRenderSnapshots = new WeakMap<HTMLElement, ContainerRenderSnapshot>();
   private readonly documentStates = new Map<Document, DocumentState>();
   private readonly pluginSettingsComponent: PluginSettingsComponent;
@@ -208,35 +195,38 @@ export class PropertyFieldVisualsComponent extends Component {
    * know when CodeMirror has replaced the viewport after a scroll.
    */
   public createEditorExtension(): Extension {
-    return ViewPlugin.define((view) => {
-      const scrollListener = (): void => this.onCodeMirrorScroll(view);
-      const viewportMutationListener = (): void => this.onCodeMirrorViewportMutation(view);
-      const ownerWindow = view.dom.ownerDocument.defaultView;
-      const sourceView = getCodeMirrorSourceView(view);
-      const MutationObserverConstructor = ownerWindow?.MutationObserver;
-      const contentObserver = MutationObserverConstructor === undefined ? null : new MutationObserverConstructor(viewportMutationListener);
-      contentObserver?.observe(view.contentDOM, { attributeFilter: ['class'], attributes: true, childList: true, subtree: true });
-      const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
-      const resizeObserver = ResizeObserverConstructor === undefined ? null : new ResizeObserverConstructor(viewportMutationListener);
-      resizeObserver?.observe(view.dom);
-      resizeObserver?.observe(view.contentDOM);
-      if (sourceView !== null) {
-        resizeObserver?.observe(sourceView);
-      }
-      view.scrollDOM.addEventListener('scroll', scrollListener, { passive: true });
-      this.registerCodeMirrorView(view);
-      return {
-        destroy: (): void => {
-          contentObserver?.disconnect();
-          resizeObserver?.disconnect();
-          view.scrollDOM.removeEventListener('scroll', scrollListener);
-          this.unregisterCodeMirrorView(view);
-        },
-        update: (update: ViewUpdate): void => {
-          this.onCodeMirrorUpdate(update);
+    return [
+      EditorView.scrollHandler.of((view) => this.propertyHistoryScrollViews.has(view) && getCodeMirrorSourceView(view)?.classList.contains('is-live-preview') === true),
+      ViewPlugin.define((view) => {
+        const scrollListener = (): void => this.onCodeMirrorScroll(view);
+        const viewportMutationListener = (): void => this.onCodeMirrorViewportMutation(view);
+        const ownerWindow = view.dom.ownerDocument.defaultView;
+        const sourceView = getCodeMirrorSourceView(view);
+        const MutationObserverConstructor = ownerWindow?.MutationObserver;
+        const contentObserver = MutationObserverConstructor === undefined ? null : new MutationObserverConstructor(viewportMutationListener);
+        contentObserver?.observe(view.contentDOM, { attributeFilter: ['class'], attributes: true, childList: true, subtree: true });
+        const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
+        const resizeObserver = ResizeObserverConstructor === undefined ? null : new ResizeObserverConstructor(viewportMutationListener);
+        resizeObserver?.observe(view.dom);
+        resizeObserver?.observe(view.contentDOM);
+        if (sourceView !== null) {
+          resizeObserver?.observe(sourceView);
         }
-      };
-    });
+        view.scrollDOM.addEventListener('scroll', scrollListener, { passive: true });
+        this.registerCodeMirrorView(view);
+        return {
+          destroy: (): void => {
+            contentObserver?.disconnect();
+            resizeObserver?.disconnect();
+            view.scrollDOM.removeEventListener('scroll', scrollListener);
+            this.unregisterCodeMirrorView(view);
+          },
+          update: (update: ViewUpdate): void => {
+            this.onCodeMirrorUpdate(update);
+          }
+        };
+      })
+    ];
   }
 
   public override onunload(): void {
@@ -254,9 +244,6 @@ export class PropertyFieldVisualsComponent extends Component {
       }
       if (state.renderFrame !== null) {
         ownerDocument.defaultView?.cancelAnimationFrame(state.renderFrame);
-      }
-      if (state.propertyEditCaptureTimer !== null) {
-        ownerDocument.defaultView?.clearTimeout(state.propertyEditCaptureTimer);
       }
       state.popover?.remove();
       state.sourceHighlight?.classList.remove('np-property-field-source-highlight');
@@ -310,16 +297,10 @@ export class PropertyFieldVisualsComponent extends Component {
       hideTimer: null,
       hoveredBreadcrumbField: null,
       hoveredThreadingField: null,
-      isApplyingPropertyHistory: false,
-      lastPropertyEdit: null,
       lastPropertyEditorView: null,
       metadataContainerCleanups: new Map(),
       mutationObserver: null,
       popover: null,
-      propertyEditCaptureTimer: null,
-      propertyEditCommitPending: false,
-      propertyEditDraft: null,
-      propertyEditStart: null,
       renderedContainers: new Set(),
       renderedSourceViews: new Set(),
       renderFrame: null,
@@ -330,6 +311,7 @@ export class PropertyFieldVisualsComponent extends Component {
     this.documentStates.set(ownerDocument, state);
     this.applyBodyClasses(ownerDocument);
 
+    this.listen(ownerDocument, state, 'pointerdown', () => this.clearPropertyHistoryScroll(ownerDocument));
     this.listen(ownerDocument, state, 'focusin', (event) => this.onFocusIn(ownerDocument, event));
     this.listen(ownerDocument, state, 'focusout', (event) => this.onFocusOut(ownerDocument, event));
     this.listen(ownerDocument, state, 'input', (event) => this.onPropertyEditorChanged(ownerDocument, event));
@@ -470,29 +452,15 @@ export class PropertyFieldVisualsComponent extends Component {
       hideSourceViewOverlay(sourceView);
     }
     if (update.docChanged) {
-      const state = this.documentStates.get(update.view.dom.ownerDocument);
-      const editStart = state?.propertyEditStart ?? null;
-      if (
-        state !== undefined
-        && editStart !== null
-        && !state.isApplyingPropertyHistory
-        && this.findCodeMirrorView(editStart.view.containerEl) === update.view
-      ) {
-        const currentValue = update.view.state.doc.toString();
-        const transaction = capturePropertyEditTransaction(editStart, currentValue);
-        if (transaction !== null) {
-          state.propertyEditDraft = transaction;
-          if (state.propertyEditCommitPending) {
-            state.lastPropertyEdit = transaction;
-            state.propertyEditCommitPending = false;
-            state.propertyEditDraft = null;
-          }
-        }
-      } else if (state !== undefined && !state.isApplyingPropertyHistory && state.lastPropertyEdit !== null && this.findCodeMirrorView(state.lastPropertyEdit.view.containerEl) === update.view) {
-        const currentValue = update.view.state.doc.toString();
-        if (currentValue !== state.lastPropertyEdit.before && currentValue !== state.lastPropertyEdit.after) {
-          state.lastPropertyEdit = null;
-        }
+      const isPropertyHistory = sourceView?.classList.contains('is-live-preview') === true
+        && update.transactions.some((transaction) => transaction.isUserEvent('undo') || transaction.isUserEvent('redo'))
+        && update.transactions.every(isFrontmatterOnlyChange);
+      if (isPropertyHistory) {
+        // Native history deliberately bypasses Obsidian's hidden-frontmatter transaction filter.
+        // Cancel its scroll request at CodeMirror's scroll boundary, before any viewport jump.
+        this.propertyHistoryScrollViews.add(update.view);
+      } else {
+        this.propertyHistoryScrollViews.delete(update.view);
       }
     }
     this.scheduleRender(update.view.dom.ownerDocument);
@@ -796,11 +764,6 @@ export class PropertyFieldVisualsComponent extends Component {
       if (state !== undefined) {
         const view = this.findMarkdownView(ownerDocument, container);
         state.lastPropertyEditorView = view;
-        if (view !== null && state.propertyEditStart === null && isPropertyEditorTarget(target)) {
-          state.propertyEditStart = { before: view.editor.getValue(), view };
-          state.propertyEditDraft = null;
-        }
-        this.schedulePropertyEditCapture(ownerDocument, state);
       }
       this.invalidateContainer(container);
     }
@@ -817,12 +780,6 @@ export class PropertyFieldVisualsComponent extends Component {
     if (metadataContainer !== null && state !== undefined) {
       const view = this.findMarkdownView(ownerDocument, metadataContainer);
       state.lastPropertyEditorView = view;
-      // A metadata rerender commonly focuses a replacement input immediately after Escape.
-      // This starts a fresh baseline without discarding the committed undo/redo transaction.
-      if (view !== null && isPropertyEditorTarget(target) && (!state.propertyEditCommitPending || this.captureCurrentPropertyEdit(state, true))) {
-        state.propertyEditStart = { before: view.editor.getValue(), view };
-        state.propertyEditDraft = null;
-      }
     }
     if (!this.pluginSettingsComponent.settings.isActiveCursorPropertyFieldThreadingEnabled || propertyElement === null || !this.isMainThreadingEnabled(detectViewMode(propertyElement))) {
       return;
@@ -833,120 +790,58 @@ export class PropertyFieldVisualsComponent extends Component {
     }
   }
 
-  private onKeyDown(ownerDocument: Document, event: KeyboardEvent): void {
-    const state = this.documentStates.get(ownerDocument);
-    const eventElement = event.target instanceof ownerDocument.defaultView!.Element ? event.target : ownerDocument.activeElement;
-    if (event.key === 'Escape' && eventElement instanceof ownerDocument.defaultView!.Element && eventElement.closest(METADATA_CONTAINER_SELECTOR) !== null) {
-      if (state !== undefined) {
-        state.propertyEditCommitPending = true;
-        this.captureCurrentPropertyEdit(state, true);
-        this.schedulePropertyEditCapture(ownerDocument, state, 0, true);
+  private clearPropertyHistoryScroll(ownerDocument: Document): void {
+    for (const view of this.codeMirrorViews) {
+      if (view.dom.ownerDocument === ownerDocument) {
+        this.propertyHistoryScrollViews.delete(view);
       }
-      return;
     }
+  }
+
+  private onKeyDown(ownerDocument: Document, event: KeyboardEvent): void {
     const isRedo = isRedoShortcut(event);
     const isUndo = isUndoShortcut(event);
-    if ((!isRedo && !isUndo) || event.repeat) {
+    if (!isRedo && !isUndo) {
+      this.clearPropertyHistoryScroll(ownerDocument);
       return;
     }
-
-    // Preserve Source mode's native history transaction while suppressing its incidental
-    // Selection-driven jump to the bottom of Frontmatter.
-    const activeView = this.findMarkdownView(ownerDocument, eventElement) ?? state?.lastPropertyEditorView ?? null;
-    const activeCodeMirrorView = activeView === null ? null : this.findCodeMirrorView(activeView.containerEl);
-    const activeSourceView = activeCodeMirrorView === null ? null : getCodeMirrorSourceView(activeCodeMirrorView);
-    if (activeCodeMirrorView !== null && activeSourceView !== null && !activeSourceView.classList.contains('is-live-preview')) {
-      this.preserveCodeMirrorScroll(activeCodeMirrorView);
+    if (event.repeat || event.defaultPrevented) {
       return;
     }
-
-    if (state === undefined || (eventElement instanceof ownerDocument.defaultView!.Element && eventElement.closest(METADATA_CONTAINER_SELECTOR) !== null && isPropertyEditorTarget(eventElement))) {
+    const target = event.target;
+    if (!(target instanceof ownerDocument.defaultView!.HTMLElement)) {
       return;
     }
-    const edit = state.lastPropertyEdit;
-    if (edit === null || !edit.view.containerEl.isConnected || (activeView !== null && activeView !== edit.view)) {
+    // Inputs keep their own editing history. A metadata row is not an input, even when
+    // The surrounding CodeMirror content has contenteditable=true.
+    if (isPropertyEditorTarget(target)) {
       return;
     }
-    const currentValue = edit.view.editor.getValue();
-    const direction = isUndo ? 'undo' : 'redo';
-    const expectedValue = direction === 'undo' ? edit.after : edit.before;
-    if (currentValue !== expectedValue) {
+    const state = this.documentStates.get(ownerDocument);
+    const activeView = target === ownerDocument.body
+      ? this.app.workspace.getActiveViewOfType(MarkdownView)
+      : this.findMarkdownView(ownerDocument, target);
+    if (activeView === null || state?.lastPropertyEditorView !== activeView) {
       return;
     }
-    state.lastPropertyEdit = edit;
-    state.isApplyingPropertyHistory = true;
-    let wasApplied: boolean;
-    try {
-      wasApplied = this.applyPropertyEditTransaction(edit, direction);
-    } finally {
-      state.isApplyingPropertyHistory = false;
-    }
-    if (!wasApplied) {
+    const codeMirrorView = this.findCodeMirrorView(activeView.containerEl);
+    if (codeMirrorView === null || getCodeMirrorSourceView(codeMirrorView)?.classList.contains('is-live-preview') !== true) {
       return;
     }
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  }
-
-  private applyPropertyEditTransaction(edit: PropertyEditTransaction, direction: 'redo' | 'undo'): boolean {
-    const codeMirrorView = this.findCodeMirrorView(edit.view.containerEl);
-    const sourceView = codeMirrorView === null ? null : getCodeMirrorSourceView(codeMirrorView);
-    if (codeMirrorView === null || sourceView?.classList.contains('is-live-preview') !== true) {
-      return false;
+    const before = codeMirrorView.state.doc;
+    if (isUndo) {
+      activeView.editor.undo();
+    } else {
+      activeView.editor.redo();
     }
-    const before = direction === 'undo' ? edit.after : edit.before;
-    const after = direction === 'undo' ? edit.before : edit.after;
-    if (codeMirrorView.state.doc.toString() !== before) {
-      return false;
+    if (codeMirrorView.state.doc !== before) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
     }
-    const replacement = computeTextReplacement(before, after);
-    if (replacement === null) {
-      return false;
-    }
-    // Obsidian's native Properties history bridge scrolls the editor selection to the end of
-    // Frontmatter and loses Ctrl+Y after Escape. Apply the exact captured change to the associated
-    // EditorView without creating another history item or requesting a selection scroll.
-    this.preserveCodeMirrorScroll(codeMirrorView);
-    codeMirrorView.dispatch({
-      annotations: Transaction.addToHistory.of(false),
-      changes: {
-        from: replacement.start,
-        insert: replacement.replacement,
-        to: replacement.end
-      },
-      scrollIntoView: false,
-      selection: codeMirrorView.state.selection
-    });
-    return codeMirrorView.state.doc.toString() === after;
-  }
-
-  private preserveCodeMirrorScroll(view: EditorView): void {
-    const scrollTop = view.scrollDOM.scrollTop;
-    const scrollLeft = view.scrollDOM.scrollLeft;
-    function restore(): void {
-      view.scrollDOM.scrollTop = scrollTop;
-      view.scrollDOM.scrollLeft = scrollLeft;
-    }
-    const win = view.dom.ownerDocument.defaultView;
-    view.requestMeasure({
-      key: 'nested-properties-property-history-viewport',
-      read: () => ({ scrollLeft, scrollTop }),
-      write: (snapshot) => {
-        view.scrollDOM.scrollTop = snapshot.scrollTop;
-        view.scrollDOM.scrollLeft = snapshot.scrollLeft;
-      }
-    });
-    win?.requestAnimationFrame(restore);
   }
 
   private onFocusOut(ownerDocument: Document, event: FocusEvent): void {
-    const target = event.target;
     const state = this.documentStates.get(ownerDocument);
-    if (target instanceof ownerDocument.defaultView!.Element && target.closest(METADATA_CONTAINER_SELECTOR) !== null && state !== undefined) {
-      state.propertyEditCommitPending = true;
-      this.captureCurrentPropertyEdit(state, true);
-      this.schedulePropertyEditCapture(ownerDocument, state, 0, true);
-    }
     if (!this.pluginSettingsComponent.settings.isActiveCursorPropertyFieldThreadingEnabled) {
       return;
     }
@@ -988,55 +883,6 @@ export class PropertyFieldVisualsComponent extends Component {
       this.showSourceBreadcrumb(ownerDocument, roots, node, ownerDocument.activeElement instanceof HTMLElement ? ownerDocument.activeElement : view.containerEl, view);
     }
     this.scheduleRender(ownerDocument);
-  }
-
-  private captureCurrentPropertyEdit(state: DocumentState, commit: boolean): boolean {
-    const editStart = state.propertyEditStart;
-    if (editStart?.view.containerEl.isConnected === true) {
-      const transaction = capturePropertyEditTransaction(editStart, editStart.view.editor.getValue());
-      if (transaction !== null) {
-        state.propertyEditDraft = transaction;
-      }
-    }
-    if (commit && state.propertyEditDraft !== null) {
-      state.lastPropertyEdit = state.propertyEditDraft;
-      state.propertyEditDraft = null;
-      state.propertyEditCommitPending = false;
-      return true;
-    }
-    return state.propertyEditDraft !== null;
-  }
-
-  private schedulePropertyEditCapture(ownerDocument: Document, state: DocumentState, attempt = 0, commit = false): void {
-    const editStart = state.propertyEditStart;
-    const win = ownerDocument.defaultView;
-    if (editStart === null || win === null) {
-      return;
-    }
-    if (state.propertyEditCaptureTimer !== null) {
-      win.clearTimeout(state.propertyEditCaptureTimer);
-    }
-    const delay = PROPERTY_EDIT_CAPTURE_DELAYS_IN_MILLISECONDS[attempt] ?? PROPERTY_EDIT_CAPTURE_DELAYS_IN_MILLISECONDS.at(-1)!;
-    state.propertyEditCaptureTimer = win.setTimeout(() => {
-      state.propertyEditCaptureTimer = null;
-      if (state.propertyEditStart !== editStart || !editStart.view.containerEl.isConnected) {
-        return;
-      }
-      if (this.captureCurrentPropertyEdit(state, commit)) {
-        if (!isPropertyEditorActive(ownerDocument, editStart.view)) {
-          state.propertyEditStart = null;
-        }
-        return;
-      }
-      if (attempt + 1 < PROPERTY_EDIT_CAPTURE_DELAYS_IN_MILLISECONDS.length) {
-        this.schedulePropertyEditCapture(ownerDocument, state, attempt + 1, commit);
-      } else if (!isPropertyEditorActive(ownerDocument, editStart.view)) {
-        state.propertyEditStart = null;
-        if (commit) {
-          state.propertyEditCommitPending = false;
-        }
-      }
-    }, delay);
   }
 
   private scheduleRender(ownerDocument: Document): void {
@@ -1808,8 +1654,35 @@ export function computeTextReplacement(before: string, after: string): TextRepla
   };
 }
 
-function capturePropertyEditTransaction(editStart: PropertyEditStart | null, after: string): PropertyEditTransaction | null {
-  return editStart === null || editStart.before === after ? null : { ...editStart, after };
+export function isFrontmatterOnlyChange(transaction: Pick<import('@codemirror/state').Transaction, 'changes' | 'startState' | 'newDoc'>): boolean {
+  if (transaction.changes.empty) {
+    return true;
+  }
+  const oldEnd = getFrontmatterEnd(transaction.startState.doc);
+  const newEnd = getFrontmatterEnd(transaction.newDoc);
+  if (oldEnd === null || newEnd === null) {
+    return false;
+  }
+  let isWithinFrontmatter = true;
+  transaction.changes.iterChangedRanges((fromA, toA, fromB, toB) => {
+    if (fromA < 4 || toA > oldEnd || fromB < 4 || toB > newEnd) {
+      isWithinFrontmatter = false;
+    }
+  });
+  return isWithinFrontmatter;
+}
+
+function getFrontmatterEnd(doc: Text): number | null {
+  if (doc.line(1).text !== '---') {
+    return null;
+  }
+  for (let lineNumber = 2; lineNumber <= doc.lines; lineNumber += 1) {
+    const line = doc.line(lineNumber);
+    if (line.text === '---' || line.text === '...') {
+      return line.from;
+    }
+  }
+  return null;
 }
 
 function appendPath(svg: SVGSVGElement, data: string, className: string, depth: number): void {
@@ -1998,15 +1871,8 @@ function asElement(node: Node): Element | null {
 }
 
 function isPropertyEditorTarget(target: Element): boolean {
-  return target.matches('input, textarea, [contenteditable="true"]') || target.closest('[contenteditable="true"]') !== null;
-}
-
-function isPropertyEditorActive(ownerDocument: Document, view: MarkdownView): boolean {
-  const activeElement = ownerDocument.activeElement;
-  return activeElement instanceof ownerDocument.defaultView!.Element
-    && view.containerEl.contains(activeElement)
-    && activeElement.closest(METADATA_CONTAINER_SELECTOR) !== null
-    && isPropertyEditorTarget(activeElement);
+  return target.matches('input, textarea')
+    || (target.instanceOf(target.ownerDocument.defaultView!.HTMLElement) && target.isContentEditable);
 }
 
 function getRelevantStyleAttributePart(attributeName: 'class' | 'style', value: string): string {
