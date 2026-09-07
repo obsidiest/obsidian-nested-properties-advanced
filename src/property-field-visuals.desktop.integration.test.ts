@@ -395,31 +395,64 @@ describe('property-field visuals in real Obsidian', () => {
         }
         const activeSourceView = sourceView;
         const sourceRect = sourceView.getBoundingClientRect();
-        async function isLineActivated(text: string, expectedBreadcrumbText: string): Promise<boolean> {
+        function getKeyRect(line: HTMLElement, keyLength: number): DOMRect {
+          const walker = ownerDocument.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+          let node = walker.nextNode();
+          let remaining = keyLength;
+          while (node !== null && remaining > (node.textContent?.length ?? 0)) {
+            remaining -= node.textContent?.length ?? 0;
+            node = walker.nextNode();
+          }
+          if (node === null) {
+            throw new Error('Rendered Source key text was not found');
+          }
+          const range = ownerDocument.createRange();
+          range.selectNodeContents(line);
+          range.setEnd(node, remaining);
+          return range.getBoundingClientRect();
+        }
+        async function isLineActivated(text: string, expectedBreadcrumbText: string, isKeyScope = false): Promise<boolean> {
           const line = [...activeSourceView.querySelectorAll<HTMLElement>('.cm-line')].find((candidate) => candidate.textContent.includes(text));
           if (line === undefined) {
             throw new Error(`Source line was not found: ${text}`);
           }
           const rect = line.getBoundingClientRect();
-          moveMouse({ x: sourceRect.right - 24, y: (rect.top + rect.bottom) / 2 });
+          const keyRect = isKeyScope ? getKeyRect(line, text.length) : null;
+          moveMouse({ x: keyRect === null ? sourceRect.right - 24 : (keyRect.left + keyRect.right) / 2, y: (rect.top + rect.bottom) / 2 });
           await waitUntil({
             message: `Source breadcrumb did not activate for ${text}`,
             predicate: () => ownerDocument.querySelector<HTMLElement>('.np-property-breadcrumb-popover')?.textContent.includes(expectedBreadcrumbText) === true
           });
+          if (isKeyScope) {
+            moveMouse({ x: sourceRect.right - 24, y: (rect.top + rect.bottom) / 2 });
+            await waitUntil({
+              message: `Source key breadcrumb stayed active beyond ${text}`,
+              predicate: () => ownerDocument.querySelector('.np-property-breadcrumb-popover') === null
+            });
+          }
           return ownerDocument.querySelector('.np-property-field-source-highlight') === line;
         }
 
-        const rootKey = markdownView.editor.getValue().includes('historyRootRenamed:') ? 'historyRootRenamed' : 'historyRoot';
+        const isFlattenedFieldActive = await isLineActivated('flat.object:', 'flat.object');
+        const isRootFieldActive = await isLineActivated('historyRoot:', 'historyRoot');
+        moveMouse({ x: sourceRect.right - 24, y: sourceRect.top + 1 });
+        await waitUntil({ message: 'Source field breadcrumb did not deactivate outside its row', predicate: () => ownerDocument.querySelector('.np-property-breadcrumb-popover') === null });
+        await testPlugin.pluginSettingsComponent.editAndSave((settings) => {
+          settings.isFullWidthPropertyFieldHoverActivationEnabled = false;
+          settings.isFullWidthPropertyKeyHoverActivationEnabled = true;
+        });
 
         return {
-          flattened: await isLineActivated('flat.object:', 'flat.object'),
-          root: await isLineActivated(`${rootKey}:`, rootKey)
+          flattened: isFlattenedFieldActive,
+          flattenedKey: await isLineActivated('flat.object:', 'flat.object', true),
+          root: isRootFieldActive,
+          rootKey: await isLineActivated('historyRoot:', 'historyRoot', true)
         };
       },
       contextId,
       vaultPath: vault.path
     });
 
-    expect(result).toEqual({ flattened: true, root: true });
+    expect(result).toEqual({ flattened: true, flattenedKey: true, root: true, rootKey: true });
   });
 });
