@@ -167,6 +167,7 @@ describe('property-field visuals in real Obsidian', () => {
           message: 'Trusted input did not finish renaming the property key',
           predicate: () => input.value === 'historyRootRenamed'
         });
+        const historyDuringEditing = snapshotHistory();
         clickElement({ element: focusExitTarget });
         await waitUntil({
           message: 'Trusted click did not leave the property editor',
@@ -209,14 +210,17 @@ describe('property-field visuals in real Obsidian', () => {
         const activeElementBeforeUndo = ownerDocument.activeElement;
         function snapshotHistory(): string {
           const plugin = app.plugins.getPlugin('nested-properties-advanced');
-          const diagnostics = plugin?._children.find((child) => 'documentStates' in child) as HistoryDiagnostics | undefined;
+          const diagnostics = plugin?._children.flatMap((child) => [child, ...child._children]).find((child) => 'documentStates' in child) as HistoryDiagnostics | undefined;
           const history = diagnostics?.documentStates.get(ownerDocument);
+          if (history === undefined) {
+            throw new Error('Live property-history diagnostics were not found in the plugin component tree');
+          }
           return JSON.stringify({
-            committedAfter: history?.lastPropertyEdit?.after.split('\n', 2)[1],
-            committedBefore: history?.lastPropertyEdit?.before.split('\n', 2)[1],
-            draftAfter: history?.propertyEditDraft?.after.split('\n', 2)[1],
-            pending: history?.propertyEditCommitPending,
-            startBefore: history?.propertyEditStart?.before.split('\n', 2)[1]
+            committedAfter: history.lastPropertyEdit?.after.split('\n', 2)[1],
+            committedBefore: history.lastPropertyEdit?.before.split('\n', 2)[1],
+            draftAfter: history.propertyEditDraft?.after.split('\n', 2)[1],
+            pending: history.propertyEditCommitPending,
+            startBefore: history.propertyEditStart?.before.split('\n', 2)[1]
           });
         }
         const historyBeforeUndo = snapshotHistory();
@@ -236,6 +240,7 @@ describe('property-field visuals in real Obsidian', () => {
                 defaultPrevented: wasUndoDefaultPrevented,
                 eventKey: undoEventKey,
                 historyBeforeUndo,
+                historyDuringEditing,
                 reachedDocument: didUndoReachDocument
               })
             }`,
