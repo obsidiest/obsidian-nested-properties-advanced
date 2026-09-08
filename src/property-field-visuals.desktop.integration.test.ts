@@ -18,6 +18,8 @@ import {
   it
 } from 'vitest';
 
+import { writeDesktopFixtures } from '../scripts/desktop-fixtures.ts';
+
 const TEST_NOTE_PATH = 'property-field-visuals.md';
 const ROOT_KEY_BEFORE = 'historyRoot';
 const vault = getTemporaryVault();
@@ -81,8 +83,8 @@ Body
 `;
 }
 
-beforeAll(() => {
-  vault.populate({
+beforeAll(async () => {
+  await writeDesktopFixtures(vault.path, {
     [TEST_NOTE_PATH]: createLongFrontmatter()
   });
 });
@@ -123,8 +125,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await evalInObsidian({
-    callback: ({ context: { markdownView } }) => {
-      markdownView.leaf.detach();
+    callback: ({ context }) => {
+      (context as Partial<Context>).markdownView?.leaf.detach();
     },
     contextId,
     vaultPath: vault.path
@@ -156,6 +158,7 @@ describe('property-field visuals in real Obsidian', () => {
 
         activeScroller.scrollTop = 0;
         clickElement({ element: input });
+        await waitUntil({ message: 'The property input did not receive the click', predicate: () => ownerDocument.activeElement === input });
         pressKey({ key: 'a', modifiers: ['Ctrl'] });
         for (const character of testCase.text) {
           pressKey({ key: character });
@@ -169,10 +172,12 @@ describe('property-field visuals in real Obsidian', () => {
           // Escape then leaves the control reached during the metadata focus handoff.
           pressKey({ key: 'Enter' });
           await waitUntil({ message: 'Enter did not commit the property edit', predicate: () => markdownView.editor.getValue().includes(testCase.after) });
-          await new Promise<void>((resolve) => {
-            ownerDocument.defaultView?.requestAnimationFrame(() => {
-              resolve();
-            });
+          await waitUntil({
+            message: 'Enter did not hand focus to the property value or row',
+            predicate: () =>
+              testCase.kind === 'key'
+                ? ownerDocument.activeElement?.closest('.metadata-property-value') !== null && ownerDocument.activeElement !== input
+                : !ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]')
           });
           pressKey({ key: 'Escape' });
         } else {

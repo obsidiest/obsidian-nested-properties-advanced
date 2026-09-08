@@ -7,10 +7,12 @@ import {
   it
 } from 'vitest';
 
+import { writeDesktopFixtures } from '../scripts/desktop-fixtures.ts';
+
 const vault = getTemporaryVault();
 
-beforeEach(() => {
-  vault.populate({
+beforeEach(async () => {
+  await writeDesktopFixtures(vault.path, {
     'full-key-scalar.md': `---
 a_very_long_top_level_scalar_property_key_that_gets_truncated: value
 container_object:

@@ -17,6 +17,8 @@ import {
   it
 } from 'vitest';
 
+import { writeDesktopFixtures } from '../scripts/desktop-fixtures.ts';
+
 const vault = getTemporaryVault();
 interface RuntimeContext {
   markdownView: MarkdownView;
@@ -42,16 +44,22 @@ let minimalCss = '';
 
 beforeAll(async () => {
   // Pin the real stylesheet; do not silently test whatever the theme's next release changes.
-  const response = await fetch('https://raw.githubusercontent.com/kepano/obsidian-minimal/504c2e9c27012f4ea7cc898d242722ee8b795dbc/theme.css');
-  if (!response.ok) {
-    throw new Error(`Could not load pinned Minimal stylesheet: ${String(response.status)}`);
-  }
-  minimalCss = await response.text();
-  vault.populate({
-    '.obsidian/themes/Minimal-runtime/manifest.json': JSON.stringify({ author: '@kepano', minAppVersion: '1.9.0', name: 'Minimal-runtime', version: '8.2.2' }),
-    '.obsidian/themes/Minimal-runtime/theme.css': minimalCss,
-    'property-runtime.md': FIXTURE
+  minimalCss = await evalInObsidian({
+    callback: async ({ app, obsidianModule: { requestUrl } }) => {
+      const response = await requestUrl('https://raw.githubusercontent.com/kepano/obsidian-minimal/504c2e9c27012f4ea7cc898d242722ee8b795dbc/theme.css');
+      const directory = `${app.vault.configDir}/themes/Minimal-runtime`;
+      for (const folder of [`${app.vault.configDir}/themes`, directory]) {
+        if (!await app.vault.adapter.exists(folder)) {
+          await app.vault.adapter.mkdir(folder);
+        }
+      }
+      await app.vault.adapter.write(`${directory}/manifest.json`, JSON.stringify({ author: '@kepano', minAppVersion: '1.9.0', name: 'Minimal-runtime', version: '8.2.2' }));
+      await app.vault.adapter.write(`${directory}/theme.css`, response.text);
+      return response.text;
+    },
+    vaultPath: vault.path
   });
+  await writeDesktopFixtures(vault.path, { 'property-runtime.md': FIXTURE });
 });
 
 beforeEach(async () => {
@@ -94,7 +102,7 @@ afterEach(async () => {
   await evalInObsidian({
     callback: ({ app, context }) => {
       app.customCss.setTheme(context.theme);
-      context.markdownView.leaf.detach();
+      (context as Partial<RuntimeContext>).markdownView?.leaf.detach();
       app.vault.setConfig('showInlineTitle', context.showInlineTitle);
       app.vault.setConfig('showViewHeader', context.showViewHeader);
     },
@@ -191,18 +199,23 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         const after = inputKind === 'key' ? `${keyName}Changed:` : `${keyName}: updated`;
         const before = inputKind === 'key' ? `${keyName}:` : `${keyName}: ${keyName === 'root' ? 'original' : 'value'}`;
         clickElement({ element: input });
+        await waitUntil({ message: 'The property input did not receive the click', predicate: () => source.ownerDocument.activeElement === input });
         pressKey({ key: 'a', modifiers: ['Ctrl'] });
         for (const character of text) {
           pressKey({ key: character });
         }
+        await waitUntil({ message: 'Typing did not reach the property input', predicate: () => (input.instanceOf(HTMLInputElement) ? input.value : input.textContent) === text });
         pressKey({ key: 'Enter' });
-        await waitUntil({ predicate: () => markdownView.editor.getValue().includes(after) });
-        await new Promise<void>((resolve) => {
-          source.ownerDocument.defaultView?.requestAnimationFrame(() => {
-            resolve();
-          });
+        await waitUntil({ message: 'Enter did not commit the property edit', predicate: () => markdownView.editor.getValue().includes(after) });
+        await waitUntil({
+          message: 'Enter did not hand focus to the property value or row',
+          predicate: () =>
+            inputKind === 'key'
+              ? source.ownerDocument.activeElement?.closest('.metadata-property-value') !== null && source.ownerDocument.activeElement !== input
+              : !source.ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]')
         });
         pressKey({ key: 'Escape' });
+        await waitUntil({ message: 'Escape did not leave the property input', predicate: () => !source.ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]') });
         const sourceRect = source.getBoundingClientRect();
         clickMouse({ x: sourceRect.right - 30, y: sourceRect.top + 80 });
         const doc = source.ownerDocument;
@@ -321,7 +334,11 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
               const active = isSourceMode
                 ? source.querySelector('.np-property-field-source-highlight')?.textContent.trimStart().startsWith(`${key}:`)
                 : source.querySelector<HTMLInputElement>(':scope .np-property-field-active .metadata-property-key-input')?.value === key;
-              const hasThread = source.querySelector('.np-property-thread-active, .np-property-thread-all, .np-property-thread-root-active') !== null;
+              const hasThread = [...source.querySelectorAll<SVGPathElement>('.np-property-thread-active, .np-property-thread-all, .np-property-thread-root-active')].some((path) => {
+                const style = source.ownerDocument.defaultView?.getComputedStyle(path);
+                return path.getClientRects().length > 0 && path.getTotalLength() > 0 && style?.visibility === 'visible'
+                  && style.stroke !== 'none' && Number.parseFloat(style.strokeOpacity) > 0 && Number.parseFloat(style.strokeWidth) > 0;
+              });
               if (!active || !hasThread) {
                 failures.push({ active, hasThread, key, mode, x });
               }
