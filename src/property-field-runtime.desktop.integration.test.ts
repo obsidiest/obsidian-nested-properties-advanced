@@ -162,6 +162,9 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
               }
             }
             moveMouse({ x: surface.right - 8, y: surface.top + 2 });
+            // Electron can coalesce back-to-back mouse moves. Confirm that the exit is
+            // Delivered before moving toward a row previously covered by the popover.
+            await waitUntil({ predicate: () => doc.querySelector('.np-property-breadcrumb-popover') === null });
           }
         }
         return failures;
@@ -173,9 +176,9 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
     expect(result).toEqual([]);
   });
 
-  it.each(['root', 'leaf'])('keeps native redo after %s edit, Escape and focus on editor padding', async (key) => {
+  it.each(['root', 'leaf'].flatMap((key) => ['padding', 'breadcrumb'].map((focus) => ({ focus, key }))))('keeps native redo after $key edit, Escape and $focus interaction', async ({ focus, key }) => {
     const result = await evalInObsidian({
-      callback: async ({ context: { markdownView }, keyName, lib: { clickElement, clickMouse, pressKey, waitUntil } }) => {
+      callback: async ({ context: { markdownView }, focusTarget, keyName, lib: { clickElement, clickMouse, moveMouse, pressKey, waitUntil } }) => {
         const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
         const input = [...markdownView.containerEl.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((candidate) => candidate.value === keyName);
         if (source === null || input === undefined) {
@@ -198,6 +201,25 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         await new Promise<void>((resolve) => {
           doc.defaultView?.setTimeout(resolve, 2500);
         });
+        if (focusTarget === 'breadcrumb') {
+          const restored = [...source.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((candidate) => candidate.value === keyName);
+          if (restored === undefined) {
+            throw new Error('Undone property did not render');
+          }
+          restored.scrollIntoView({ block: 'nearest' });
+          const rect = restored.getBoundingClientRect();
+          moveMouse({ x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 });
+          await waitUntil({ predicate: () => doc.querySelector('.np-property-breadcrumb-popover') !== null });
+          const button = doc.querySelector<HTMLElement>(':scope .np-property-breadcrumb-popover .is-current button');
+          if (button === null) {
+            throw new Error('Breadcrumb button missing');
+          }
+          const buttonRect = button.getBoundingClientRect();
+          moveMouse({ x: (buttonRect.left + buttonRect.right) / 2, y: (buttonRect.top + buttonRect.bottom) / 2 });
+          await new Promise<void>((resolve) => {
+            doc.defaultView?.setTimeout(resolve, 180);
+          });
+        }
         const focusBeforeRedo = doc.activeElement?.className;
         pressKey({ key: 'y', modifiers: ['Ctrl'] });
         await new Promise<void>((resolve) => {
@@ -206,9 +228,37 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         return { focusBeforeRedo, focusBeforeUndo, isRedone: markdownView.editor.getValue().includes(`${keyName}Changed:`) };
       },
       contextId,
-      input: { keyName: key },
+      input: { focusTarget: focus, keyName: key },
       vaultPath: vault.path
     });
     expect(result.isRedone, JSON.stringify(result)).toBe(true);
+  });
+
+  it('activates the clicked full-width row in Active Cursor mode', async () => {
+    const result = await evalInObsidian({
+      callback: async ({ context: { markdownView, settingsTab }, lib: { clickMouse, waitUntil } }) => {
+        await settingsTab.setControlValue('isPropertyFieldHoverBreadcrumbEnabled', false);
+        await settingsTab.setControlValue('isActiveCursorPropertyFieldThreadingEnabled', true);
+        const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
+        const input = [...markdownView.containerEl.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((candidate) => candidate.value === 'leaf');
+        if (source === null || input === undefined) {
+          throw new Error('Cursor fixture missing');
+        }
+        const surface = source.getBoundingClientRect();
+        const keyRect = input.getBoundingClientRect();
+        clickMouse({ x: surface.right - 24, y: (keyRect.top + keyRect.bottom) / 2 });
+        await waitUntil({ predicate: () => source.ownerDocument.activeElement !== source.ownerDocument.body });
+        await new Promise<void>((resolve) => {
+          source.ownerDocument.defaultView?.setTimeout(resolve, 180);
+        });
+        return {
+          activeKey: source.querySelector<HTMLInputElement>(':scope .np-property-field-active .metadata-property-key-input')?.value ?? null,
+          focus: source.ownerDocument.activeElement?.className
+        };
+      },
+      contextId,
+      vaultPath: vault.path
+    });
+    expect(result.activeKey, JSON.stringify(result)).toBe('leaf');
   });
 });
