@@ -10,11 +10,19 @@ permissions:
 
 jobs:
   desktop-property-visuals:
-    name: Property visuals in Obsidian
-    runs-on: ubuntu-latest
+    name: Property visuals in Obsidian (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            installer: 1.13.7
+          - os: windows-latest
+            installer: 1.13.4
     env:
-      OBSIDIAN_INSTALLER_VERSION: 1.13.7
+      OBSIDIAN_INSTALLER_VERSION: ${{ matrix.installer }}
       OBSIDIAN_VERSION: 1.13.7
 
     steps:
@@ -33,8 +41,13 @@ jobs:
       - name: Build the plugin
         run: npm run build
 
-      - name: Run desktop integration tests
+      - name: Run desktop integration tests on Linux
+        if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:integration:desktop
+
+      - name: Run desktop integration tests on Windows
+        if: runner.os == 'Windows'
+        run: npm run test:integration:desktop
 
   validate:
     name: Compile, test, and build

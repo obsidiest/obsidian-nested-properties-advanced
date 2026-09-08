@@ -28,11 +28,13 @@ import {
   getPropertyFieldMutationContainers,
   getShownMetadataContainers,
   getShownSourceViews,
+  getSourceKeyActivationRects,
   getSourceKeyCharacterRange,
   getThreadDepthColorIndex,
   hideSourceViewOverlay,
   isContainerRenderCurrent,
   isFrontmatterOnlyChange,
+  isPointerWithinActivationRegion,
   isPropertyFieldMutation,
   isPropertyVisualStyleMutation,
   isRedoShortcut,
@@ -207,7 +209,7 @@ describe('property field visual render guards', () => {
     settings.isPropertyFieldThreadingEnabled = true;
     const component = castTo<TestPropertyFieldVisualsComponent>(
       new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
-        app: { workspace: { layoutReady: false } },
+        app: { workspace: { iterateAllLeaves: vi.fn(), layoutReady: false } },
         pluginSettingsComponent: { settings }
       }))
     );
@@ -233,6 +235,20 @@ describe('property field visual render guards', () => {
 
     expect(state.active).toMatchObject({ element: property, kind: 'dom' });
     expect(state.hoveredBreadcrumbField).toBe(property);
+    const originalHitTest = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => sourceView });
+    // The browser's painted surface remains authoritative when pointer capture sends
+    // An event to a different DOM subtree.
+    document.body.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 1600, clientY: 30 }));
+    expect(state.hoveredBreadcrumbField).toBe(property);
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => document.body });
+    key.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 150, clientY: 30 }));
+    expect(state.hoveredBreadcrumbField).toBeNull();
+    if (originalHitTest === undefined) {
+      Reflect.deleteProperty(document, 'elementFromPoint');
+    } else {
+      Object.defineProperty(document, 'elementFromPoint', originalHitTest);
+    }
     state.mutationObserver?.disconnect();
     state.bodyStyleObserver?.disconnect();
     for (const cleanup of state.cleanups) {
@@ -255,6 +271,33 @@ describe('property field visual render guards', () => {
     expect(findElementAtClientY([first, second], 35)).toBeNull();
     first.remove();
     second.remove();
+  });
+
+  it('should use separate visual bands for a wrapped Source key and exclude its wrapped value', () => {
+    const line = document.body.createDiv({ cls: 'cm-line', text: 'Wrapped property name: value' });
+    const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value: () => [new DOMRect(100, 22, 290, 16), new DOMRect(100, 42, 40, 16)]
+    });
+    vi.spyOn(line, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 20, 300, 60));
+    const view = {
+      coordsAtPos: (): Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'> => ({ bottom: 60, left: 140, right: 140, top: 40 }),
+      defaultLineHeight: 20,
+      state: EditorState.create({ doc: '---\nWrapped property name: value\n---' })
+    };
+    const region = { field: line.getBoundingClientRect(), key: null, keyFragments: getSourceKeyActivationRects(view, line, 1), toggles: [] };
+    expect(isPointerWithinActivationRegion(region, 'key', 380, 30)).toBe(true);
+    expect(isPointerWithinActivationRegion(region, 'key', 120, 50)).toBe(true);
+    expect(isPointerWithinActivationRegion(region, 'key', 200, 50)).toBe(false);
+    expect(isPointerWithinActivationRegion(region, 'key', 120, 70)).toBe(false);
+    expect(isPointerWithinActivationRegion(region, 'field', 380, 70)).toBe(true);
+    if (originalRects === undefined) {
+      Reflect.deleteProperty(Range.prototype, 'getClientRects');
+    } else {
+      Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
+    }
+    line.remove();
   });
 
   it('should resolve a rendered property from its key, value, or blank row width', () => {
@@ -299,7 +342,7 @@ describe('property field visual render guards', () => {
     settings.isPropertyFieldThreadingEnabled = true;
     const component = castTo<TestPropertyFieldVisualsComponent>(
       new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
-        app: { workspace: { layoutReady: false } },
+        app: { workspace: { iterateAllLeaves: vi.fn(), layoutReady: false } },
         pluginSettingsComponent: { settings }
       }))
     );
@@ -365,7 +408,7 @@ describe('property field visual render guards', () => {
     settings.isPropertyFieldThreadingEnabled = true;
     const component = castTo<TestPropertyFieldVisualsComponent>(
       new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
-        app: { workspace: { layoutReady: false } },
+        app: { workspace: { iterateAllLeaves: vi.fn(), layoutReady: false } },
         pluginSettingsComponent: { settings }
       }))
     );
@@ -438,7 +481,7 @@ describe('property field visual render guards', () => {
   it('should select the primary Markdown editor when a nested CodeMirror view registered first', () => {
     const component = castTo<TestPropertyFieldVisualsComponent>(
       new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
-        app: { workspace: { layoutReady: false } },
+        app: { workspace: { iterateAllLeaves: vi.fn(), layoutReady: false } },
         pluginSettingsComponent: { settings: new PluginSettings() }
       }))
     );
@@ -499,7 +542,7 @@ describe('property field visual render guards', () => {
     settings.isFullWidthPropertyKeyHoverActivationEnabled = true;
     const component = castTo<TestPropertyFieldVisualsComponent>(
       new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
-        app: { workspace: { layoutReady: false } },
+        app: { workspace: { iterateAllLeaves: vi.fn(), layoutReady: false } },
         pluginSettingsComponent: { settings }
       }))
     );

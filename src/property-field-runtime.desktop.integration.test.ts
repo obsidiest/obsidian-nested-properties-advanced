@@ -176,28 +176,45 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
     expect(result).toEqual([]);
   });
 
-  it.each(['root', 'leaf'].flatMap((key) => ['padding', 'breadcrumb'].map((focus) => ({ focus, key }))))('keeps native redo after $key edit, Escape and $focus interaction', async ({ focus, key }) => {
+  it.each(['root', 'leaf'].flatMap((key) => ['key', 'value'].flatMap((kind) => ['padding', 'breadcrumb'].map((focus) => ({ focus, key, kind })))))('keeps native redo after $key $kind edit, Escape and $focus interaction', async ({ focus, key, kind }) => {
     const result = await evalInObsidian({
-      callback: async ({ context: { markdownView }, focusTarget, keyName, lib: { clickElement, clickMouse, moveMouse, pressKey, waitUntil } }) => {
+      callback: async ({ context: { markdownView }, focusTarget, inputKind, keyName, lib: { clickElement, clickMouse, moveMouse, pressKey, waitUntil } }) => {
         const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
-        const input = [...markdownView.containerEl.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((candidate) => candidate.value === keyName);
-        if (source === null || input === undefined) {
+        const keyInput = [...markdownView.containerEl.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((candidate) => candidate.value === keyName);
+        const input = inputKind === 'key' ? keyInput : keyInput?.closest('.metadata-property')?.querySelector<HTMLElement>(':scope > .metadata-property-value [contenteditable="true"]');
+        const scroller = source?.querySelector<HTMLElement>('.cm-scroller');
+        if (source === null || input === undefined || input === null || scroller === undefined || scroller === null) {
           throw new Error('History surface missing');
         }
+        const activeScroller = scroller;
+        const text = inputKind === 'key' ? `${keyName}Changed` : 'updated';
+        const after = inputKind === 'key' ? `${keyName}Changed:` : `${keyName}: updated`;
+        const before = inputKind === 'key' ? `${keyName}:` : `${keyName}: ${keyName === 'root' ? 'original' : 'value'}`;
         clickElement({ element: input });
         pressKey({ key: 'a', modifiers: ['Ctrl'] });
-        for (const character of `${keyName}Changed`) {
+        for (const character of text) {
           pressKey({ key: character });
         }
         pressKey({ key: 'Enter' });
-        await waitUntil({ predicate: () => markdownView.editor.getValue().includes(`${keyName}Changed:`) });
+        await waitUntil({ predicate: () => markdownView.editor.getValue().includes(after) });
+        await new Promise<void>((resolve) => {
+          source.ownerDocument.defaultView?.requestAnimationFrame(() => {
+            resolve();
+          });
+        });
         pressKey({ key: 'Escape' });
         const sourceRect = source.getBoundingClientRect();
         clickMouse({ x: sourceRect.right - 30, y: sourceRect.top + 80 });
         const doc = source.ownerDocument;
         const focusBeforeUndo = doc.activeElement?.className;
+        const scrollTop = scroller.scrollTop;
+        let maximumScrollDelta = 0;
+        function measureScroll(): void {
+          maximumScrollDelta = Math.max(maximumScrollDelta, Math.abs(activeScroller.scrollTop - scrollTop));
+        }
+        scroller.addEventListener('scroll', measureScroll);
         pressKey({ key: 'z', modifiers: ['Ctrl'] });
-        await waitUntil({ message: 'Undo from editor padding failed', predicate: () => markdownView.editor.getValue().includes(`${keyName}:`) });
+        await waitUntil({ message: 'Undo from editor padding failed', predicate: () => markdownView.editor.getValue().includes(before) });
         await new Promise<void>((resolve) => {
           doc.defaultView?.setTimeout(resolve, 2500);
         });
@@ -206,7 +223,6 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           if (restored === undefined) {
             throw new Error('Undone property did not render');
           }
-          restored.scrollIntoView({ block: 'nearest' });
           const rect = restored.getBoundingClientRect();
           moveMouse({ x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 });
           await waitUntil({ predicate: () => doc.querySelector('.np-property-breadcrumb-popover') !== null });
@@ -225,13 +241,16 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         await new Promise<void>((resolve) => {
           doc.defaultView?.setTimeout(resolve, 500);
         });
-        return { focusBeforeRedo, focusBeforeUndo, isRedone: markdownView.editor.getValue().includes(`${keyName}Changed:`) };
+        measureScroll();
+        scroller.removeEventListener('scroll', measureScroll);
+        return { focusBeforeRedo, focusBeforeUndo, isRedone: markdownView.editor.getValue().includes(after), maximumScrollDelta };
       },
       contextId,
-      input: { focusTarget: focus, keyName: key },
+      input: { focusTarget: focus, inputKind: kind, keyName: key },
       vaultPath: vault.path
     });
     expect(result.isRedone, JSON.stringify(result)).toBe(true);
+    expect(result.maximumScrollDelta, JSON.stringify(result)).toBeLessThanOrEqual(2);
   });
 
   it('activates the clicked full-width row in Active Cursor mode', async () => {
@@ -260,5 +279,99 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
       vaultPath: vault.path
     });
     expect(result.activeKey, JSON.stringify(result)).toBe('leaf');
+  });
+
+  it.each([false, true])('activates each threading mode across root and nested rows with Source=%s', async (isSource) => {
+    const result = await evalInObsidian({
+      callback: async ({ context: { markdownView, settingsTab }, isSourceMode, lib: { clickMouse, moveMouse, waitUntil } }) => {
+        await settingsTab.setControlValue('isPropertyFieldHoverBreadcrumbEnabled', false);
+        await settingsTab.setControlValue('isActiveRootLevelPropertyFieldTreeThreadingEnabled', true);
+        await settingsTab.setControlValue('isAllBranchesOfActiveRootLevelPropertyFieldTreeThreadingEnabled', false);
+        await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: 'source', source: isSourceMode }, type: 'markdown' });
+        const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
+        if (source === null) {
+          throw new Error('Threading surface missing');
+        }
+        await waitUntil({ predicate: () => source.classList.contains('is-live-preview') !== isSourceMode });
+        const failures: object[] = [];
+        for (const mode of ['active', 'all', 'root', 'cursor']) {
+          await settingsTab.setControlValue('isActiveCursorPropertyFieldThreadingEnabled', mode === 'cursor');
+          await settingsTab.setControlValue('isActivePropertyFieldThreadingEnabled', mode === 'active' || mode === 'cursor');
+          await settingsTab.setControlValue('isAllBranchesOfActivePropertyFieldTreeThreadingEnabled', mode === 'all');
+          await settingsTab.setControlValue('isActiveRootLevelPropertyFieldThreadingEnabled', mode === 'root');
+          for (const key of ['root', 'leaf']) {
+            const row = isSourceMode
+              ? [...source.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${key}:`))
+              : [...source.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((input) => input.value === key);
+            if (row === undefined) {
+              throw new Error('Threading row missing');
+            }
+            const rect = row.getBoundingClientRect();
+            const surface = source.getBoundingClientRect();
+            for (const x of [surface.left + 4, rect.left + 12, surface.right - 24]) {
+              const point = { x, y: (rect.top + rect.bottom) / 2 };
+              if (mode === 'cursor') {
+                clickMouse(point);
+              } else {
+                moveMouse(point);
+              }
+              await new Promise<void>((resolve) => {
+                source.ownerDocument.defaultView?.setTimeout(resolve, 100);
+              });
+              const active = isSourceMode
+                ? source.querySelector('.np-property-field-source-highlight')?.textContent.trimStart().startsWith(`${key}:`)
+                : source.querySelector<HTMLInputElement>(':scope .np-property-field-active .metadata-property-key-input')?.value === key;
+              const hasThread = source.querySelector('.np-property-thread-active, .np-property-thread-all, .np-property-thread-root-active') !== null;
+              if (!active || !hasThread) {
+                failures.push({ active, hasThread, key, mode, x });
+              }
+            }
+          }
+        }
+        return failures;
+      },
+      contextId,
+      input: { isSourceMode: isSource },
+      vaultPath: vault.path
+    });
+    expect(result).toEqual([]);
+  });
+
+  it('activates every rendered fragment of a wrapped Source key', async () => {
+    const isResult = await evalInObsidian({
+      callback: async ({ context: { markdownView, settingsTab }, lib: { moveMouse, waitUntil } }) => {
+        const key = 'A long property key with enough words to wrap across the editor width '.repeat(3).trim();
+        markdownView.editor.setValue(markdownView.editor.getValue().replace('root: original', () => `${key}: original`));
+        await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: 'source', source: true }, type: 'markdown' });
+        await settingsTab.setControlValue('isFullWidthPropertyFieldHoverActivationEnabled', false);
+        await settingsTab.setControlValue('isFullWidthPropertyKeyHoverActivationEnabled', true);
+        const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
+        if (source === null) {
+          throw new Error('Wrapped Source fixture missing');
+        }
+        await waitUntil({ predicate: () => !source.classList.contains('is-live-preview') });
+        const line = [...source.querySelectorAll<HTMLElement>('.cm-line')].find((element) => element.textContent.startsWith(key));
+        if (line === undefined) {
+          throw new Error('Wrapped Source line missing');
+        }
+        const doc = source.ownerDocument;
+        const range = doc.createRange();
+        range.selectNodeContents(line);
+        const fragments = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0);
+        const top = Math.min(...fragments.map((rect) => rect.top));
+        const firstLine = fragments.filter((rect) => rect.top === top).sort((left, right) => right.right - left.right)[0];
+        if (firstLine === undefined || new Set(fragments.map((rect) => rect.top)).size < 2) {
+          throw new Error('Source key did not wrap');
+        }
+        moveMouse({ x: firstLine.right - 4, y: (firstLine.top + firstLine.bottom) / 2 });
+        await new Promise<void>((resolve) => {
+          doc.defaultView?.setTimeout(resolve, 180);
+        });
+        return doc.querySelector(':scope .np-property-breadcrumb-popover .is-current button')?.textContent === key;
+      },
+      contextId,
+      vaultPath: vault.path
+    });
+    expect(isResult).toBe(true);
   });
 });

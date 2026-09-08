@@ -73,6 +73,7 @@ interface DocumentState {
   metadataContainerCleanups: Map<HTMLElement, () => void>;
   mutationObserver: MutationObserver | null;
   popover: HTMLElement | null;
+  popoverOwner: MarkdownView | null;
   renderedContainers: Set<HTMLElement>;
   renderedSourceViews: Set<HTMLElement>;
   renderFrame: number | null;
@@ -107,6 +108,7 @@ interface Point {
 interface PointerActivationRegion {
   field: Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>;
   key: null | Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>;
+  keyFragments?: Array<Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>>;
   toggles: Array<Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>>;
 }
 
@@ -302,6 +304,7 @@ export class PropertyFieldVisualsComponent extends Component {
       metadataContainerCleanups: new Map(),
       mutationObserver: null,
       popover: null,
+      popoverOwner: null,
       renderedContainers: new Set(),
       renderedSourceViews: new Set(),
       renderFrame: null,
@@ -312,7 +315,9 @@ export class PropertyFieldVisualsComponent extends Component {
     this.documentStates.set(ownerDocument, state);
     this.applyBodyClasses(ownerDocument);
 
-    this.listen(ownerDocument, state, 'pointerdown', () => this.clearPropertyHistoryScroll(ownerDocument));
+    const pointerDownListener = (event: PointerEvent): void => this.onPointerDown(ownerDocument, event);
+    ownerDocument.addEventListener('pointerdown', pointerDownListener, { capture: true });
+    state.cleanups.push(() => ownerDocument.removeEventListener('pointerdown', pointerDownListener, { capture: true }));
     this.listen(ownerDocument, state, 'focusin', (event) => this.onFocusIn(ownerDocument, event));
     this.listen(ownerDocument, state, 'focusout', (event) => this.onFocusOut(ownerDocument, event));
     this.listen(ownerDocument, state, 'input', (event) => this.onPropertyEditorChanged(ownerDocument, event));
@@ -327,9 +332,11 @@ export class PropertyFieldVisualsComponent extends Component {
       }
     };
     ownerDocument.addEventListener('pointermove', pointerMoveListener, { capture: true, passive: true });
+    ownerDocument.addEventListener('pointerover', pointerMoveListener, { capture: true, passive: true });
     ownerDocument.addEventListener('pointerout', pointerOutListener, { capture: true, passive: true });
     state.cleanups.push(() => {
       ownerDocument.removeEventListener('pointermove', pointerMoveListener, { capture: true });
+      ownerDocument.removeEventListener('pointerover', pointerMoveListener, { capture: true });
       ownerDocument.removeEventListener('pointerout', pointerOutListener, { capture: true });
     });
     this.listen(ownerDocument, state, 'keyup', () => this.onEditorCursorChanged(ownerDocument));
@@ -540,7 +547,7 @@ export class PropertyFieldVisualsComponent extends Component {
   }
 
   private onPointerMove(ownerDocument: Document, event: PointerEvent): void {
-    const target = event.target;
+    const target = getElementAtPointer(ownerDocument, event);
     if (!(target instanceof ownerDocument.defaultView!.Element)) {
       this.clearPointerActivation(ownerDocument, true);
       return;
@@ -606,6 +613,58 @@ export class PropertyFieldVisualsComponent extends Component {
     this.updateSourcePointerActivation(ownerDocument, state, sourceTarget, breadcrumbLine, threadingLine);
   }
 
+  private onPointerDown(ownerDocument: Document, event: PointerEvent): void {
+    this.clearPropertyHistoryScroll(ownerDocument);
+    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || !this.pluginSettingsComponent.settings.isActiveCursorPropertyFieldThreadingEnabled) {
+      return;
+    }
+    const target = getElementAtPointer(ownerDocument, event);
+    if (target?.closest('.np-property-breadcrumb-popover') !== null) {
+      return;
+    }
+    const region = resolveDomPointerRegionAtPointer(target, event.clientX, event.clientY);
+    if (region !== null) {
+      if (!this.isMainThreadingEnabled(detectViewMode(region.element)) || !isPointerWithinActivationRegion(region.activation, 'field', event.clientX, event.clientY)) {
+        return;
+      }
+      const control = target.closest('input, textarea, select, button, a, [contenteditable="true"], .metadata-property-icon, .nested-properties-collapse-btn');
+      if (control !== null && region.element.contains(control)) {
+        return;
+      }
+      // Blank row space must focus its metadata row, not CodeMirror's hidden frontmatter.
+      // The same region is used for hover and clicks, including nested rows outside their DOM box.
+      event.preventDefault();
+      if (!region.element.hasAttribute('tabindex')) {
+        region.element.tabIndex = -1;
+      }
+      region.element.focus({ preventScroll: true });
+      const state = this.documentStates.get(ownerDocument);
+      if (state !== undefined) {
+        state.active = { container: region.container, element: region.element, kind: 'dom' };
+        state.lastPropertyEditorView = this.findMarkdownView(ownerDocument, region.element);
+        this.scheduleRender(ownerDocument);
+      }
+      return;
+    }
+    if (!this.isMainThreadingEnabled('source')) {
+      return;
+    }
+    const sourceRegion = this.resolveSourcePointerRegion(target, event.clientX, event.clientY, null);
+    if (sourceRegion === null || sourceRegion.codeMirrorView.contentDOM.contains(target) || target.closest(SOURCE_FOLD_CONTROL_SELECTOR) !== null) {
+      return;
+    }
+    const sourceTarget = this.resolveSourceTarget(sourceRegion.lineElement, sourceRegion.codeMirrorView, sourceRegion.documentLine);
+    if (sourceTarget === null) {
+      return;
+    }
+    event.preventDefault();
+    const view = sourceRegion.codeMirrorView;
+    const line = view.state.doc.line(sourceTarget.node.line + 1);
+    view.dispatch({ scrollIntoView: false, selection: { anchor: line.from + sourceTarget.node.column } });
+    view.focus();
+    this.onEditorCursorChanged(ownerDocument);
+  }
+
   private clearPointerActivation(ownerDocument: Document, dismissImmediately = false): void {
     const state = this.documentStates.get(ownerDocument);
     if (state === undefined) {
@@ -663,6 +722,7 @@ export class PropertyFieldVisualsComponent extends Component {
     state.hideTimer = null;
     state.popover?.remove();
     state.popover = null;
+    state.popoverOwner = null;
     if (ownerDocument !== undefined) {
       for (const element of ownerDocument.querySelectorAll('.np-property-field-popover-highlight')) {
         element.classList.remove('np-property-field-popover-highlight');
@@ -820,7 +880,9 @@ export class PropertyFieldVisualsComponent extends Component {
       return;
     }
     const state = this.documentStates.get(ownerDocument);
-    const activeView = target === ownerDocument.body
+    const activeView = state?.popover?.contains(target) === true
+      ? state.popoverOwner
+      : target === ownerDocument.body
       ? this.app.workspace.getActiveViewOfType(MarkdownView)
       : this.findMarkdownView(ownerDocument, target);
     if (activeView === null || state?.lastPropertyEditorView !== activeView) {
@@ -1339,6 +1401,7 @@ export class PropertyFieldVisualsComponent extends Component {
     });
     ownerDocument.body.append(popover);
     state.popover = popover;
+    state.popoverOwner = this.findMarkdownView(ownerDocument, anchor);
     this.positionPopover(popover, anchor.getBoundingClientRect());
     this.drawBreadcrumbGuides(tree, entries, rowElements);
     const currentIndex = entries.findIndex((entry) => entry.current);
@@ -1521,8 +1584,10 @@ export class PropertyFieldVisualsComponent extends Component {
     if (lineElement === null) {
       return null;
     }
-    const documentLine = resolveCodeMirrorDocumentLineAtPointer(codeMirrorView, clientX, clientY)
-      ?? resolveCodeMirrorDocumentLine(codeMirrorView, lineElement);
+    // The rendered row owns its document identity. Horizontal padding and wrapped text
+    // Must not ask a nearest-caret lookup to choose a different property.
+    const documentLine = resolveCodeMirrorDocumentLine(codeMirrorView, lineElement)
+      ?? resolveCodeMirrorDocumentLineAtPointer(codeMirrorView, clientX, clientY);
     if (documentLine === null) {
       return null;
     }
@@ -1872,6 +1937,13 @@ function asElement(node: Node): Element | null {
   return node.nodeType === node.ELEMENT_NODE ? node as Element : node.parentElement;
 }
 
+function getElementAtPointer(ownerDocument: Document, event: Pick<PointerEvent, 'clientX' | 'clientY' | 'target'>): Element | null {
+  // Pointer capture and DOM replacement can retarget an event. Resolve the painted
+  // Surface at the physical point first; children only identify the owning surface.
+  return ownerDocument.elementFromPoint?.(event.clientX, event.clientY)
+    ?? (event.target instanceof ownerDocument.defaultView!.Element ? event.target : null);
+}
+
 function isPropertyEditorTarget(target: Element): boolean {
   return target.matches('input, textarea')
     || (target.instanceOf(target.ownerDocument.defaultView!.HTMLElement) && target.isContentEditable);
@@ -1936,13 +2008,8 @@ export function resolveDomPropertyAtPointer(target: Element, clientX: number, cl
   if (container === null) {
     return null;
   }
-  const directProperty = target.closest<HTMLElement>('.metadata-property');
-  if (directProperty !== null && directProperty.closest(METADATA_CONTAINER_SELECTOR) === container) {
-    const directRect = getDomPropertyDirectHitRect(directProperty);
-    if (directRect !== null && clientY >= directRect.top && clientY <= directRect.bottom) {
-      return directProperty;
-    }
-  }
+  // Select from the rendered row bands even when a stretched ancestor key or
+  // A captured child receives the event. Parent DOM containment does not own a child row.
   return findPropertyFieldHitEntryAtPointer(container, clientY)?.element ?? null;
 }
 
@@ -1998,6 +2065,7 @@ export function isPointerWithinActivationRegion(region: PointerActivationRegion,
   }
   if (scope === 'key') {
     return (region.key !== null && isClientPointWithinRect(region.key, clientX, clientY))
+      || (region.keyFragments?.some((rect) => isClientPointWithinRect(rect, clientX, clientY)) === true)
       || region.toggles.some((rect) => isClientPointWithinRect(rect, clientX, clientY));
   }
   return region.toggles.some((rect) => isClientPointWithinRect(rect, clientX, clientY));
@@ -2044,12 +2112,13 @@ function createSourcePointerActivationRegion(
       right: horizontalRect.right,
       top: lineRect.top
     },
-    key: breadcrumbScope === 'key' ? getSourceKeyActivationRect(view, lineElement, documentLine) : null,
+    key: null,
+    keyFragments: breadcrumbScope === 'key' ? getSourceKeyActivationRects(view, lineElement, documentLine) : [],
     toggles: breadcrumbScope === 'key' || breadcrumbScope === 'toggle' ? getSourceFoldToggleActivationRects(sourceView, lineRect) : []
   };
 }
 
-function getSourceKeyActivationRect(view: EditorView, lineElement: HTMLElement, documentLine: number): null | Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'> {
+export function getSourceKeyActivationRects(view: Pick<EditorView, 'coordsAtPos' | 'defaultLineHeight' | 'state'>, lineElement: HTMLElement, documentLine: number): Array<Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>> {
   const lineRect = lineElement.getBoundingClientRect();
   let text: string;
   let lineFrom: number;
@@ -2058,11 +2127,24 @@ function getSourceKeyActivationRect(view: EditorView, lineElement: HTMLElement, 
     text = line.text;
     lineFrom = line.from;
   } catch {
-    return null;
+    return [];
   }
   const characterRange = getSourceKeyCharacterRange(text);
   if (characterRange === null) {
-    return null;
+    return [];
+  }
+  const range = createTextRange(lineElement, characterRange.start, characterRange.end);
+  const rects = range === null || typeof range.getClientRects !== 'function' ? [] : Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+  if (rects.length > 0) {
+    return rects.map((rect) => {
+      const padding = Math.max(0, (view.defaultLineHeight - rect.height) / 2);
+      return {
+        bottom: Math.min(lineRect.bottom, rect.bottom + padding),
+        left: lineRect.left,
+        right: rect.right,
+        top: Math.max(lineRect.top, rect.top - padding)
+      };
+    });
   }
   let keyRight = NaN;
   try {
@@ -2074,18 +2156,12 @@ function getSourceKeyActivationRect(view: EditorView, lineElement: HTMLElement, 
     // CodeMirror may replace the viewport between the pointer event and this measurement.
   }
   if (!Number.isFinite(keyRight)) {
-    const range = createTextRange(lineElement, characterRange.start, characterRange.end);
-    const rects = range === null || typeof range.getClientRects !== 'function' ? [] : Array.from(range.getClientRects()).filter((rect) => rect.width > 0);
-    if (rects.length > 0) {
-      keyRight = Math.max(...rects.map((rect) => rect.right));
-    } else {
-      const rect = range?.getBoundingClientRect();
-      keyRight = rect !== undefined && rect.width > 0 ? rect.right : NaN;
-    }
+    const rect = range?.getBoundingClientRect();
+    keyRight = rect !== undefined && rect.width > 0 ? rect.right : NaN;
   }
   return Number.isFinite(keyRight) && keyRight > lineRect.left
-    ? { bottom: lineRect.bottom, left: lineRect.left, right: keyRight, top: lineRect.top }
-    : null;
+    ? [{ bottom: lineRect.bottom, left: lineRect.left, right: keyRight, top: lineRect.top }]
+    : [];
 }
 
 function getSourceFoldToggleActivationRects(sourceView: HTMLElement, lineRect: Pick<DOMRect, 'bottom' | 'top'>): Array<Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>> {
@@ -2402,7 +2478,7 @@ function getCodeMirrorViewOwnershipScore(view: EditorView, element: Element, sou
 
 export function resolveCodeMirrorLineElementAtPointer(view: Pick<EditorView, 'contentDOM'>, target: Element, clientY: number): HTMLElement | null {
   const directLine = target.closest<HTMLElement>('.cm-line');
-  if (directLine !== null && view.contentDOM.contains(directLine)) {
+  if (directLine !== null && view.contentDOM.contains(directLine) && isClientYWithinRect(directLine.getBoundingClientRect(), clientY)) {
     return directLine;
   }
   return findElementAtClientY(Array.from(view.contentDOM.querySelectorAll<HTMLElement>('.cm-line')), clientY);
