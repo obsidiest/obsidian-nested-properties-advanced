@@ -195,11 +195,53 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           throw new Error('History surface missing');
         }
         const activeScroller = scroller;
+        const editedInput = input;
+        const activeSource = source;
+        function recordFocusTrace(): object[] {
+          const events: object[] = [];
+          for (const eventName of ['focusin', 'focusout', 'keydown']) {
+            activeSource.addEventListener(eventName, (event) => {
+              if (!(events.length < 80)) {
+                return;
+              }
+
+              const target = event.target as Element;
+              events.push({
+                field: target.closest('.metadata-property')?.querySelector<HTMLInputElement>('.metadata-property-key-input')?.value,
+                key: (event as KeyboardEvent).key,
+                target: target.className,
+                time: performance.now(),
+                type: event.type
+              });
+            }, { capture: true });
+          }
+          return events;
+        }
+        const focusTrace = recordFocusTrace();
+        async function waitForFocus(message: string, isReady: () => boolean): Promise<void> {
+          try {
+            await waitUntil({ message, predicate: isReady });
+          } catch (error) {
+            const rect = editedInput.getBoundingClientRect();
+            throw new Error(
+              `${message}: ${
+                JSON.stringify({
+                  active: activeSource.ownerDocument.activeElement?.outerHTML.slice(0, 500),
+                  focusTrace,
+                  inputConnected: editedInput.isConnected,
+                  pointerTarget: activeSource.ownerDocument.elementFromPoint((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2)?.outerHTML.slice(0, 500)
+                })
+              }`,
+              { cause: error }
+            );
+          }
+        }
+
         const text = inputKind === 'key' ? `${keyName}Changed` : 'updated';
         const after = inputKind === 'key' ? `${keyName}Changed:` : `${keyName}: updated`;
         const before = inputKind === 'key' ? `${keyName}:` : `${keyName}: ${keyName === 'root' ? 'original' : 'value'}`;
         clickElement({ element: input });
-        await waitUntil({ message: 'The property input did not receive the click', predicate: () => source.ownerDocument.activeElement === input });
+        await waitForFocus('The property input did not receive the click', () => source.ownerDocument.activeElement === input);
         pressKey({ key: 'a', modifiers: ['Ctrl'] });
         for (const character of text) {
           pressKey({ key: character });
@@ -210,12 +252,12 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         await waitUntil({
           message: 'Enter did not hand focus to the property value or row',
           predicate: () =>
-            inputKind === 'key'
+            inputKind === 'key' && input.closest('.nested-properties-container') === null
               ? source.ownerDocument.activeElement?.closest('.metadata-property-value') !== null && source.ownerDocument.activeElement !== input
               : !source.ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]')
         });
         pressKey({ key: 'Escape' });
-        await waitUntil({ message: 'Escape did not leave the property input', predicate: () => !source.ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]') });
+        await waitForFocus('Escape did not leave the property input', () => !source.ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]'));
         const sourceRect = source.getBoundingClientRect();
         clickMouse({ x: sourceRect.right - 30, y: sourceRect.top + 80 });
         const doc = source.ownerDocument;

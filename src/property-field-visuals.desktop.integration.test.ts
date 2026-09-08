@@ -155,10 +155,51 @@ describe('property-field visuals in real Obsidian', () => {
           throw new Error('Live Preview scroller was not found');
         }
         const activeScroller = scroller;
+        const editedInput = input;
+        const activeSource = sourceView;
+        function recordFocusTrace(): object[] {
+          const events: object[] = [];
+          for (const eventName of ['focusin', 'focusout', 'keydown']) {
+            activeSource.addEventListener(eventName, (event) => {
+              if (!(events.length < 80)) {
+                return;
+              }
+
+              const target = event.target as Element;
+              events.push({
+                field: target.closest('.metadata-property')?.querySelector<HTMLInputElement>('.metadata-property-key-input')?.value,
+                key: (event as KeyboardEvent).key,
+                target: target.className,
+                time: performance.now(),
+                type: event.type
+              });
+            }, { capture: true });
+          }
+          return events;
+        }
+        const focusTrace = recordFocusTrace();
+        async function waitForFocus(message: string, isReady: () => boolean): Promise<void> {
+          try {
+            await waitUntil({ message, predicate: isReady });
+          } catch (error) {
+            const rect = editedInput.getBoundingClientRect();
+            throw new Error(
+              `${message}: ${
+                JSON.stringify({
+                  active: activeSource.ownerDocument.activeElement?.outerHTML.slice(0, 500),
+                  focusTrace,
+                  inputConnected: editedInput.isConnected,
+                  pointerTarget: activeSource.ownerDocument.elementFromPoint((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2)?.outerHTML.slice(0, 500)
+                })
+              }`,
+              { cause: error }
+            );
+          }
+        }
 
         activeScroller.scrollTop = 0;
         clickElement({ element: input });
-        await waitUntil({ message: 'The property input did not receive the click', predicate: () => ownerDocument.activeElement === input });
+        await waitForFocus('The property input did not receive the click', () => ownerDocument.activeElement === input);
         pressKey({ key: 'a', modifiers: ['Ctrl'] });
         for (const character of testCase.text) {
           pressKey({ key: character });
@@ -175,7 +216,7 @@ describe('property-field visuals in real Obsidian', () => {
           await waitUntil({
             message: 'Enter did not hand focus to the property value or row',
             predicate: () =>
-              testCase.kind === 'key'
+              testCase.kind === 'key' && input.closest('.nested-properties-container') === null
                 ? ownerDocument.activeElement?.closest('.metadata-property-value') !== null && ownerDocument.activeElement !== input
                 : !ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]')
           });
@@ -186,7 +227,7 @@ describe('property-field visuals in real Obsidian', () => {
           const exitRect = focusExitTarget.getBoundingClientRect();
           clickMouse({ x: exitRect.left + 2, y: exitRect.top + 2 });
         }
-        await waitUntil({ message: 'Focus did not leave the property input', predicate: () => !ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]') });
+        await waitForFocus('Focus did not leave the property input', () => !ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]'));
         await waitUntil({
           message: 'Property edit did not commit after leaving the field',
           predicate: () => markdownView.editor.getValue().includes(testCase.after)
