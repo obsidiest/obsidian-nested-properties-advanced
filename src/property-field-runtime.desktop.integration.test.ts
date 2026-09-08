@@ -31,6 +31,9 @@ const contextId = new ContextId<RuntimeContext>();
 const FIXTURE = `---
 root: original
 flat.object: flattened
+emptyScalar:
+emptyList: []
+inlineObject: {name: inline}
 Long property key that wraps onto another visual line when the editor is narrow: original
 nested:
   child:
@@ -64,7 +67,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await evalInObsidian({
-    callback: async ({ app, context, css, fixture, lib: { waitUntil } }) => {
+    callback: async ({ app, context, css, fixture, lib: { hoverElement, waitUntil } }) => {
       context.showInlineTitle = app.vault.getConfig('showInlineTitle');
       context.showViewHeader = app.vault.getConfig('showViewHeader');
       app.vault.setConfig('showInlineTitle', false);
@@ -91,6 +94,10 @@ beforeEach(async () => {
       await tab.setControlValue('isPropertyFieldThreadingInMainUiEnabled', true);
       await tab.setControlValue('isPropertyFieldHoverBreadcrumbEnabled', true);
       await tab.setControlValue('isFullWidthPropertyFieldHoverActivationEnabled', true);
+      // Park the native pointer outside the note before the next traversal. A breadcrumb
+      // From its previous position can otherwise cover the input about to be clicked.
+      await hoverElement({ element: leaf.tabHeaderEl });
+      await waitUntil({ predicate: () => leaf.view.containerEl.ownerDocument.querySelector('.np-property-breadcrumb-popover') === null });
     },
     contextId,
     input: { css: minimalCss, fixture: FIXTURE },
@@ -131,7 +138,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           }
           await settingsTab.setControlValue('isFullWidthPropertyFieldHoverActivationEnabled', scope === 'field');
           await settingsTab.setControlValue('isFullWidthPropertyKeyHoverActivationEnabled', scope === 'key');
-          for (const key of ['root', 'flat.object', 'nested', 'child', 'leaf']) {
+          for (const key of ['root', 'flat.object', 'emptyScalar', 'emptyList', 'inlineObject', 'nested', 'child', 'leaf']) {
             const keyInput = [...source.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((input) => input.value === key);
             const row = isSourceMode
               ? [...source.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${key}:`))

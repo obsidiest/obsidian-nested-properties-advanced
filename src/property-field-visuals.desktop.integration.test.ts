@@ -91,7 +91,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await evalInObsidian({
-    callback: async ({ app, context, fixture, lib: { waitUntil } }) => {
+    callback: async ({ app, context, fixture, lib: { hoverElement, waitUntil } }) => {
       const file = app.vault.getFileByPath('property-field-visuals.md');
       if (file === null) {
         throw new Error('Property visuals fixture was not found');
@@ -116,6 +116,8 @@ beforeEach(async () => {
         predicate: () => markdownView.containerEl.querySelector(':scope .metadata-container .metadata-property-key-input') !== null,
         timeoutInMilliseconds: 15_000
       });
+      await hoverElement({ element: leaf.tabHeaderEl });
+      await waitUntil({ predicate: () => leaf.view.containerEl.ownerDocument.querySelector('.np-property-breadcrumb-popover') === null });
     },
     contextId,
     input: { fixture: createLongFrontmatter() },
