@@ -20,8 +20,26 @@ import {
 import { writeDesktopFixtures } from '../scripts/desktop-fixtures.ts';
 
 const vault = getTemporaryVault();
+interface NativeElement {
+  element: Element;
+}
+interface NativeInput {
+  clickElement(params: NativeElement): void;
+  clickMouse(params: NativePoint): void;
+  moveMouse(params: NativePoint): void;
+  pressKey(params: NativeKey): void;
+}
+interface NativeKey {
+  key: string;
+  modifiers?: 'Ctrl'[];
+}
+interface NativePoint {
+  x: number;
+  y: number;
+}
 interface RuntimeContext {
   markdownView: MarkdownView;
+  nativeInput: NativeInput;
   settingsTab: PluginSettingTab;
   showInlineTitle: unknown;
   showViewHeader: unknown;
@@ -83,6 +101,32 @@ beforeEach(async () => {
       const leaf = app.workspace.getLeaf(true);
       await leaf.setViewState({ state: { file: file.path, mode: 'source', source: false }, type: 'markdown' });
       context.markdownView = leaf.view as MarkdownView;
+      // The harness's input helpers always address the main webContents. Resolve the
+      // Actual owner on each input so a moved editor receives trusted native events.
+      function send(event: Parameters<Window['electronWindow']['webContents']['sendInputEvent']>[0]): void {
+        const owner = context.markdownView.containerEl.win;
+        owner.electronWindow.webContents.sendInputEvent(event);
+      }
+      context.nativeInput = {
+        clickElement: ({ element }): void => {
+          const rect = element.getBoundingClientRect();
+          context.nativeInput.clickMouse({ x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 });
+        },
+        clickMouse: ({ x, y }): void => {
+          context.nativeInput.moveMouse({ x, y });
+          for (const type of ['mouseDown', 'mouseUp'] as const) {
+            send({ button: 'left', clickCount: 1, type, x: Math.round(x), y: Math.round(y) });
+          }
+        },
+        moveMouse: ({ x, y }): void => {
+          send({ type: 'mouseMove', x: Math.round(x), y: Math.round(y) });
+        },
+        pressKey: ({ key, modifiers = [] }): void => {
+          for (const type of ['keyDown', 'char', 'keyUp'] as const) {
+            send({ keyCode: key, modifiers: modifiers.map(() => 'control'), type });
+          }
+        }
+      };
       const tab = app.setting.pluginTabs.find((candidate) => candidate.id === 'nested-properties-advanced');
       if (tab === undefined) {
         throw new Error('Property settings tab missing');
@@ -119,11 +163,25 @@ afterEach(async () => {
 });
 
 describe('Property interaction surfaces with Minimal and hidden titles', () => {
-  it.each([false, true])('sweeps root, flattened and nested rows with Source=%s', async (isSource) => {
+  it.each([false, true].flatMap((isSource) => ['main', 'popout', 'reload'].map((lifecycle) => ({ isSource, lifecycle }))))('sweeps root, flattened and nested rows with Source=$isSource after $lifecycle', async ({ isSource, lifecycle }) => {
     const result = await evalInObsidian({
       // eslint-disable-next-line complexity -- The serialized desktop callback compares all regions in one pointer traversal.
-      callback: async ({ context: { markdownView, settingsTab }, isSourceMode, lib: { moveMouse, waitUntil } }) => {
+      callback: async ({ app, context: { markdownView, nativeInput: { moveMouse }, settingsTab: originalSettingsTab }, isSourceMode, lib: { waitUntil }, lifecycleMode }) => {
         await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: 'source', source: isSourceMode }, type: 'markdown' });
+        let settingsTab = originalSettingsTab;
+        if (lifecycleMode === 'popout') {
+          const popout = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
+          popout.win.electronWindow.focus();
+          await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === popout.doc && popout.doc.hasFocus() });
+        } else if (lifecycleMode === 'reload') {
+          await app.plugins.disablePlugin('nested-properties-advanced');
+          await app.plugins.enablePlugin('nested-properties-advanced');
+          const tab = app.setting.pluginTabs.find((candidate) => candidate.id === 'nested-properties-advanced');
+          if (tab === undefined) {
+            throw new Error('Reloaded settings missing');
+          }
+          settingsTab = tab;
+        }
         const doc = markdownView.containerEl.ownerDocument;
         const win = doc.defaultView;
         const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
@@ -173,7 +231,8 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
               });
               const current = doc.querySelector(':scope .np-property-breadcrumb-popover .is-current button')?.textContent;
               if (current !== key) {
-                failures.push({ current: current ?? null, key, scope, target: doc.elementFromPoint(x, y)?.className, x, y });
+                const target = doc.elementFromPoint(x, y);
+                failures.push({ current: current ?? null, key, ownerRealmElement: target instanceof win.Element, scope, target: target?.className, x, y });
               }
             }
             moveMouse({ x: surface.right - 8, y: surface.top + 2 });
@@ -185,15 +244,22 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         return failures;
       },
       contextId,
-      input: { isSourceMode: isSource },
+      input: { isSourceMode: isSource, lifecycleMode: lifecycle },
       vaultPath: vault.path
     });
     expect(result).toEqual([]);
   });
 
-  it.each(['root', 'leaf'].flatMap((key) => ['key', 'value'].flatMap((kind) => ['padding', 'breadcrumb'].map((focus) => ({ focus, key, kind })))))('keeps native redo after $key $kind edit, Escape and $focus interaction', async ({ focus, key, kind }) => {
+  it.each(['root', 'leaf'].flatMap((key) => ['key', 'value'].flatMap((kind) => ['padding', 'breadcrumb', 'popout'].map((focus) => ({ focus, key, kind })))))('keeps native redo after $key $kind edit, Escape and $focus interaction', async ({ focus, key, kind }) => {
     const result = await evalInObsidian({
-      callback: async ({ context: { markdownView }, focusTarget, inputKind, keyName, lib: { clickElement, clickMouse, moveMouse, pressKey, waitUntil } }) => {
+      // eslint-disable-next-line complexity -- Keep the native focus sequence and its failure trace in the same serialized callback.
+      callback: async ({ app, context: { markdownView, nativeInput: { clickElement, clickMouse, moveMouse, pressKey } }, focusTarget, inputKind, keyName, lib: { waitUntil } }) => {
+        if (focusTarget === 'popout') {
+          const popout = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
+          popout.win.electronWindow.focus();
+          await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === popout.doc && popout.doc.hasFocus() });
+          moveMouse({ x: 20, y: 20 });
+        }
         const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
         const keyInput = [...markdownView.containerEl.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((candidate) => candidate.value === keyName);
         const input = inputKind === 'key' ? keyInput : keyInput?.closest('.metadata-property')?.querySelector<HTMLElement>(':scope > .metadata-property-value [contenteditable="true"]');
@@ -343,13 +409,18 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
     expect(result.activeKey, JSON.stringify(result)).toBe('leaf');
   });
 
-  it.each([false, true])('activates each threading mode across root and nested rows with Source=%s', async (isSource) => {
+  it.each([false, true].flatMap((isSource) => [false, true].map((isPopout) => ({ isPopout, isSource }))))('activates each threading mode across root and nested rows with Source=$isSource in popout=$isPopout', async ({ isPopout, isSource }) => {
     const result = await evalInObsidian({
-      callback: async ({ context: { markdownView, settingsTab }, isSourceMode, lib: { clickMouse, moveMouse, waitUntil } }) => {
+      callback: async ({ app, context: { markdownView, nativeInput: { clickMouse, moveMouse }, settingsTab }, isPopoutWindow, isSourceMode, lib: { waitUntil } }) => {
         await settingsTab.setControlValue('isPropertyFieldHoverBreadcrumbEnabled', false);
         await settingsTab.setControlValue('isActiveRootLevelPropertyFieldTreeThreadingEnabled', true);
         await settingsTab.setControlValue('isAllBranchesOfActiveRootLevelPropertyFieldTreeThreadingEnabled', false);
         await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: 'source', source: isSourceMode }, type: 'markdown' });
+        if (isPopoutWindow) {
+          const popout = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
+          popout.win.electronWindow.focus();
+          await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === popout.doc && popout.doc.hasFocus() });
+        }
         const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
         if (source === null) {
           throw new Error('Threading surface missing');
@@ -397,7 +468,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         return failures;
       },
       contextId,
-      input: { isSourceMode: isSource },
+      input: { isPopoutWindow: isPopout, isSourceMode: isSource },
       vaultPath: vault.path
     });
     expect(result).toEqual([]);
