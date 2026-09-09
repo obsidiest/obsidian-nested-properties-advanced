@@ -74,8 +74,20 @@ type MockFunction = ReturnType<typeof vi.fn>;
 // ConvertAsyncToSync, ensureNonNullable, castTo / extractDefaultExportInterop) are NOT mocked — the
 // Renderer drives the REAL implementations.
 const hoisted = vi.hoisted(() => {
+  const htmlNamespace = 'http://www.w3.org/1999/xhtml';
+  const elementNodeType = 1;
   class MockHTMLElementBase {
     public readonly isMockElement = true;
+
+    // These legacy renderer stubs describe HTML node identity as well as prototypes.
+    // Actual mixed-window DOM and event behavior is covered by the desktop suite.
+    public get namespaceURI(): string {
+      return htmlNamespace;
+    }
+
+    public get nodeType(): number {
+      return elementNodeType;
+    }
   }
   class MockHTMLInputElementBase extends MockHTMLElementBase {}
 

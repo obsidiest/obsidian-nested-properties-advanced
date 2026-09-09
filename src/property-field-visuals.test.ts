@@ -202,7 +202,7 @@ describe('property field visual render guards', () => {
     expect(resolveBreadcrumbActivationScope(false, false)).toBe('toggle');
   });
 
-  it('should activate from the owning Markdown leaf when the visual row is not the pointer target', () => {
+  it.each([false, true])('should activate from the owning leaf with an adopted pointer target=%s', (isAdopted) => {
     Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
     const settings = new PluginSettings();
     settings.isFullWidthPropertyFieldHoverActivationEnabled = true;
@@ -225,13 +225,23 @@ describe('property field visual render guards', () => {
     const property = container.createDiv({ cls: 'metadata-property' });
     const key = property.createDiv({ cls: 'metadata-property-key', text: 'Key' });
     const value = property.createDiv({ cls: 'metadata-property-value', text: 'Value' });
+    const frame = document.body.createEl('iframe');
+    const foreignSurface = frame.contentDocument?.createElement('div');
+    if (foreignSurface === undefined) {
+      throw new Error('Expected another DOM realm');
+    }
+    sourceView.append(foreignSurface);
+    expect(foreignSurface.ownerDocument).toBe(document);
+    // Check native prototype identity; Obsidian's instanceOf helper intentionally hides this distinction.
+    expect(Object.getPrototypeOf(foreignSurface)).not.toBe(window.HTMLDivElement.prototype);
     vi.spyOn(container, 'isShown').mockReturnValue(true);
     vi.spyOn(sourceView, 'getBoundingClientRect').mockReturnValue({ bottom: 500, height: 500, left: 0, right: 1800, top: 0, width: 1800 } as DOMRect);
     vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({ bottom: 100, height: 100, left: 100, right: 900, top: 0, width: 800 } as DOMRect);
     vi.spyOn(key, 'getBoundingClientRect').mockReturnValue({ bottom: 40, height: 20, left: 100, right: 300, top: 20, width: 200 } as DOMRect);
     vi.spyOn(value, 'getBoundingClientRect').mockReturnValue({ bottom: 40, height: 20, left: 300, right: 900, top: 20, width: 600 } as DOMRect);
 
-    sourceView.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 1600, clientY: 30 }));
+    const pointerTarget = isAdopted ? foreignSurface : sourceView;
+    pointerTarget.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 1600, clientY: 30 }));
 
     expect(state.active).toMatchObject({ element: property, kind: 'dom' });
     expect(state.hoveredBreadcrumbField).toBe(property);
@@ -256,6 +266,7 @@ describe('property field visual render guards', () => {
     }
     state.popover?.remove();
     leaf.remove();
+    frame.remove();
     component.documentStates.delete(document);
     Reflect.deleteProperty(window.HTMLElement.prototype, 'scrollIntoView');
   });

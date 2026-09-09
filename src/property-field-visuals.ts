@@ -17,6 +17,11 @@ import {
 } from 'obsidian';
 import { getAllDomWindows } from 'obsidian-dev-utils/obsidian/workspace';
 
+import {
+  getDomElement,
+  getDomNode,
+  getHtmlElement
+} from './dom-target.ts';
 import { PluginSettingsComponent } from './plugin-settings-component.ts';
 import { PROPERTY_FIELD_LAYOUT_CHANGE_EVENT } from './property-field-events.ts';
 import {
@@ -343,12 +348,12 @@ export class PropertyFieldVisualsComponent extends Component {
     this.listen(ownerDocument, state, 'mouseup', () => this.onEditorCursorChanged(ownerDocument));
     const scrollListener = (event: Event): void => {
       const target = event.target;
-      const container = target instanceof ownerDocument.defaultView!.Node ? asElement(target)?.closest<HTMLElement>(METADATA_CONTAINER_SELECTOR) ?? null : null;
+      const container = getDomElement(target)?.closest<HTMLElement>(METADATA_CONTAINER_SELECTOR) ?? null;
       if (container !== null) {
         this.invalidateContainer(container);
         return;
       }
-      const sourceView = target instanceof ownerDocument.defaultView!.Node ? asElement(target)?.closest<HTMLElement>('.markdown-source-view:not(.is-live-preview)') ?? null : null;
+      const sourceView = getDomElement(target)?.closest<HTMLElement>('.markdown-source-view:not(.is-live-preview)') ?? null;
       if (sourceView !== null) {
         hideSourceViewOverlay(sourceView);
         this.clearSourcePointerActivation(ownerDocument, state, sourceView);
@@ -358,7 +363,7 @@ export class PropertyFieldVisualsComponent extends Component {
     state.cleanups.push(() => ownerDocument.removeEventListener('scroll', scrollListener, { capture: true }));
     const layoutChangeListener = (event: Event): void => {
       const target = event.target;
-      const container = target instanceof ownerDocument.defaultView!.Node ? asElement(target)?.closest<HTMLElement>(METADATA_CONTAINER_SELECTOR) ?? null : null;
+      const container = getDomElement(target)?.closest<HTMLElement>(METADATA_CONTAINER_SELECTOR) ?? null;
       if (container === null) {
         this.invalidateDocument(ownerDocument);
       } else {
@@ -548,7 +553,7 @@ export class PropertyFieldVisualsComponent extends Component {
 
   private onPointerMove(ownerDocument: Document, event: PointerEvent): void {
     const target = getElementAtPointer(ownerDocument, event);
-    if (!(target instanceof ownerDocument.defaultView!.Element)) {
+    if (target === null) {
       this.clearPointerActivation(ownerDocument, true);
       return;
     }
@@ -816,8 +821,8 @@ export class PropertyFieldVisualsComponent extends Component {
   }
 
   private onPropertyEditorChanged(ownerDocument: Document, event: Event): void {
-    const target = event.target;
-    if (target instanceof ownerDocument.defaultView!.Element) {
+    const target = getDomElement(event.target);
+    if (target !== null) {
       const container = target.closest<HTMLElement>(METADATA_CONTAINER_SELECTOR);
       const state = this.documentStates.get(ownerDocument);
       if (container === null) {
@@ -832,8 +837,8 @@ export class PropertyFieldVisualsComponent extends Component {
   }
 
   private onFocusIn(ownerDocument: Document, event: FocusEvent): void {
-    const target = event.target;
-    if (!(target instanceof ownerDocument.defaultView!.Element)) {
+    const target = getDomElement(event.target);
+    if (target === null) {
       return;
     }
     const propertyElement = target.closest<HTMLElement>('.metadata-property');
@@ -870,8 +875,8 @@ export class PropertyFieldVisualsComponent extends Component {
     if (event.repeat || event.defaultPrevented) {
       return;
     }
-    const target = event.target;
-    if (!(target instanceof ownerDocument.defaultView!.HTMLElement)) {
+    const target = getHtmlElement(event.target);
+    if (target === null) {
       return;
     }
     // Inputs keep their own editing history. A metadata row is not an input, even when
@@ -909,8 +914,8 @@ export class PropertyFieldVisualsComponent extends Component {
     if (!this.pluginSettingsComponent.settings.isActiveCursorPropertyFieldThreadingEnabled) {
       return;
     }
-    const related = event.relatedTarget;
-    if (related instanceof ownerDocument.defaultView!.Element && related.closest('.metadata-property') !== null) {
+    const related = getDomElement(event.relatedTarget);
+    if (related !== null && related.closest('.metadata-property') !== null) {
       return;
     }
     if (state?.active?.kind === 'dom') {
@@ -944,7 +949,7 @@ export class PropertyFieldVisualsComponent extends Component {
       this.highlightVisibleSourceLine(ownerDocument, view, node.line);
     }
     if (state.popover !== null && node !== null) {
-      this.showSourceBreadcrumb(ownerDocument, roots, node, ownerDocument.activeElement instanceof HTMLElement ? ownerDocument.activeElement : view.containerEl, view);
+      this.showSourceBreadcrumb(ownerDocument, roots, node, getHtmlElement(ownerDocument.activeElement) ?? view.containerEl, view);
     }
     this.scheduleRender(ownerDocument);
   }
@@ -1618,7 +1623,7 @@ export class PropertyFieldVisualsComponent extends Component {
   }
 
   private findMarkdownView(ownerDocument: Document, target: EventTarget | null): MarkdownView | null {
-    const targetNode = target instanceof ownerDocument.defaultView!.Node ? target : null;
+    const targetNode = getDomNode(target);
     let found: MarkdownView | null = null;
     this.app.workspace.iterateAllLeaves((leaf) => {
       if (found === null && leaf.view instanceof MarkdownView && leaf.view.containerEl.ownerDocument === ownerDocument && (targetNode === null || leaf.view.containerEl.contains(targetNode))) {
@@ -1941,12 +1946,12 @@ function getElementAtPointer(ownerDocument: Document, event: Pick<PointerEvent, 
   // Pointer capture and DOM replacement can retarget an event. Resolve the painted
   // Surface at the physical point first; children only identify the owning surface.
   return ownerDocument.elementFromPoint?.(event.clientX, event.clientY)
-    ?? (event.target instanceof ownerDocument.defaultView!.Element ? event.target : null);
+    ?? getDomElement(event.target);
 }
 
 function isPropertyEditorTarget(target: Element): boolean {
   return target.matches('input, textarea')
-    || (target.instanceOf(target.ownerDocument.defaultView!.HTMLElement) && target.isContentEditable);
+    || getHtmlElement(target)?.isContentEditable === true;
 }
 
 function getRelevantStyleAttributePart(attributeName: 'class' | 'style', value: string): string {

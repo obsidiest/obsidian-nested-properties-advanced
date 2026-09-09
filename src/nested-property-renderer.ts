@@ -22,6 +22,7 @@ import { ensureNonNullable } from 'obsidian-dev-utils/type-guards';
 
 import type { BooleanSettingsKey } from './plugin-setting-tab.ts';
 
+import { getHtmlElement } from './dom-target.ts';
 import { FloatingScrollbarComponent } from './floating-scrollbar.ts';
 import { MetadataTypeManagerGetTypeInfoPatchComponent } from './patches/metadata-type-manager-get-type-info-patch-component.ts';
 import { MultiTextPropertyWidgetPatchComponent } from './patches/multi-text-property-widget-patch-component.ts';
@@ -418,9 +419,7 @@ export class NestedPropertyRendererComponent extends Component {
       }
     }
 
-    if (activeDocument.activeElement instanceof HTMLElement) {
-      activeDocument.activeElement.blur();
-    }
+    getHtmlElement(activeDocument.activeElement)?.blur();
 
     // Persist to Obsidian's native `types.json`. When the chosen type matches what would be inferred
     // From the value anyway, unset the key instead so `types.json` stays free of redundant entries.
@@ -441,8 +440,8 @@ export class NestedPropertyRendererComponent extends Component {
   }
 
   private findActiveMetadataContainer(): HTMLElement | undefined {
-    const activeElement = activeDocument.activeElement;
-    if (activeElement instanceof HTMLElement) {
+    const activeElement = getHtmlElement(activeDocument.activeElement);
+    if (activeElement !== null) {
       const container = activeElement.closest<HTMLElement>('.metadata-container');
       if (container !== null) {
         return container;
@@ -601,8 +600,8 @@ export class NestedPropertyRendererComponent extends Component {
     const rootPath = `${context.sourcePath}:${context.key}`;
     this.initializeExpansionPath(rootPath, context.sourcePath);
 
-    const propertyEl = el.closest('.metadata-property');
-    if (propertyEl instanceof HTMLElement) {
+    const propertyEl = getHtmlElement(el.closest('.metadata-property'));
+    if (propertyEl !== null) {
       const isExpanded = this.expandedPaths.has(rootPath);
       propertyEl.classList.add('nested-properties-collapsible');
       propertyEl.dataset['path'] = rootPath;
@@ -610,8 +609,8 @@ export class NestedPropertyRendererComponent extends Component {
         propertyEl.classList.add('is-collapsed');
       }
 
-      const existingIcon = propertyEl.querySelector(':scope .metadata-property-key .metadata-property-icon');
-      if (existingIcon instanceof HTMLElement) {
+      const existingIcon = getHtmlElement(propertyEl.querySelector(':scope .metadata-property-key .metadata-property-icon'));
+      if (existingIcon !== null) {
         setIcon(existingIcon, widgetType === LIST_WIDGET_TYPE ? 'lucide-list-tree' : 'lucide-braces');
       }
 
@@ -638,13 +637,13 @@ export class NestedPropertyRendererComponent extends Component {
       // Size the native key input to its content so the full-key-display toggle (`width: auto`) can
       // Expand it. Obsidian's default input width overrides `size` while the toggle is off, so this is
       // Inert until the body class is present — mirroring the nested inputs in `renderKeyEl`.
-      const keyInputEl = keyEl?.querySelector(':scope .metadata-property-key-input');
-      if (keyInputEl instanceof HTMLInputElement) {
+      const keyInputEl = keyEl?.querySelector<HTMLInputElement>(':scope .metadata-property-key-input');
+      if (keyInputEl !== undefined && keyInputEl !== null) {
         keyInputEl.size = Math.max(1, keyInputEl.value.length);
       }
     }
 
-    if (propertyEl instanceof HTMLElement) {
+    if (propertyEl !== null) {
       createSummary({ expandedPaths: this.expandedPaths, parentEl: el, path: rootPath, propertyEl, value });
     }
 
@@ -660,8 +659,8 @@ export class NestedPropertyRendererComponent extends Component {
     });
 
     window.setTimeout(() => {
-      const metadataContainerEl = containerEl.closest('.metadata-container');
-      if (metadataContainerEl instanceof HTMLElement) {
+      const metadataContainerEl = getHtmlElement(containerEl.closest('.metadata-container'));
+      if (metadataContainerEl !== null) {
         metadataContainerEl.dataset[SOURCE_PATH_DATA_KEY] = context.sourcePath;
         const isFullKeyNamesExpanded = this.getInitialFullKeyNamesState(context.sourcePath);
         metadataContainerEl.classList.toggle(FULL_KEY_DISPLAY_BODY_CLASS, isFullKeyNamesExpanded);
@@ -686,13 +685,13 @@ export class NestedPropertyRendererComponent extends Component {
         for (const input of containerEl.querySelectorAll(':scope .metadata-property-key-input')) {
           if (input.instanceOf(HTMLInputElement) && input.value === key) {
             const property = input.closest('.metadata-property');
-            const valueEl = property?.querySelector(':scope > .metadata-property-value');
-            if (valueEl instanceof HTMLElement) {
-              const focusTargetEl = valueEl.querySelector('input, textarea, [contenteditable]');
-              if (focusTargetEl instanceof HTMLElement) {
-                focusTargetEl.focus();
-              } else {
+            const valueEl = getHtmlElement(property?.querySelector(':scope > .metadata-property-value') ?? null);
+            if (valueEl !== null) {
+              const focusTargetEl = getHtmlElement(valueEl.querySelector('input, textarea, [contenteditable]'));
+              if (focusTargetEl === null) {
                 valueEl.click();
+              } else {
+                focusTargetEl.focus();
               }
             }
             break;

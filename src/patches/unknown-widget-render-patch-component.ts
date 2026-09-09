@@ -6,6 +6,7 @@ import type {
 import { setIcon } from 'obsidian';
 import { MonkeyAroundComponent } from 'obsidian-dev-utils/obsidian/components/monkey-around-component';
 
+import { getHtmlElement } from '../dom-target.ts';
 import {
   isComplexValue,
   isSimpleArray
@@ -41,8 +42,8 @@ export class UnknownWidgetRenderPatchComponent extends MonkeyAroundComponent {
         originalArguments: [el, value, context]
       }) => {
         if (isSimpleArray(value)) {
-          const iconEl = el.closest('.metadata-property')?.querySelector(':scope .metadata-property-key .metadata-property-icon');
-          if (iconEl instanceof HTMLElement) {
+          const iconEl = getHtmlElement(el.closest('.metadata-property')?.querySelector(':scope .metadata-property-key .metadata-property-icon') ?? null);
+          if (iconEl !== null) {
             setIcon(iconEl, this.listWidget.icon);
           }
           return this.listWidget.render(el, value, context);
