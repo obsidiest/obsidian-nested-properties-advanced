@@ -163,17 +163,18 @@ afterEach(async () => {
 });
 
 describe('Property interaction surfaces with Minimal and hidden titles', () => {
-  it.each([false, true].flatMap((isSource) => ['main', 'popout', 'reload'].map((lifecycle) => ({ isSource, lifecycle }))))('sweeps root, flattened and nested rows with Source=$isSource after $lifecycle', async ({ isSource, lifecycle }) => {
+  it.each([false, true].flatMap((isSource) => ['main', 'popout', 'reload', 'popout-reload'].map((lifecycle) => ({ isSource, lifecycle }))))('sweeps root, flattened and nested rows with Source=$isSource after $lifecycle', async ({ isSource, lifecycle }) => {
     const result = await evalInObsidian({
       // eslint-disable-next-line complexity -- The serialized desktop callback compares all regions in one pointer traversal.
       callback: async ({ app, context: { markdownView, nativeInput: { moveMouse }, settingsTab: originalSettingsTab }, isSourceMode, lib: { waitUntil }, lifecycleMode }) => {
         await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: 'source', source: isSourceMode }, type: 'markdown' });
         let settingsTab = originalSettingsTab;
-        if (lifecycleMode === 'popout') {
+        if (lifecycleMode.startsWith('popout')) {
           const popout = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
           popout.win.electronWindow.focus();
           await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === popout.doc && popout.doc.hasFocus() });
-        } else if (lifecycleMode === 'reload') {
+        }
+        if (lifecycleMode.endsWith('reload')) {
           await app.plugins.disablePlugin('nested-properties-advanced');
           await app.plugins.enablePlugin('nested-properties-advanced');
           const tab = app.setting.pluginTabs.find((candidate) => candidate.id === 'nested-properties-advanced');
@@ -250,11 +251,11 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
     expect(result).toEqual([]);
   });
 
-  it.each(['root', 'leaf'].flatMap((key) => ['key', 'value'].flatMap((kind) => ['padding', 'breadcrumb', 'popout'].map((focus) => ({ focus, key, kind })))))('keeps native redo after $key $kind edit, Escape and $focus interaction', async ({ focus, key, kind }) => {
+  it.each(['root', 'leaf'].flatMap((key) => ['key', 'value'].flatMap((kind) => ['padding', 'breadcrumb', 'popout', 'popout-row'].map((focus) => ({ focus, key, kind })))))('keeps native redo after $key $kind edit, Escape and $focus interaction', async ({ focus, key, kind }) => {
     const result = await evalInObsidian({
       // eslint-disable-next-line complexity -- Keep the native focus sequence and its failure trace in the same serialized callback.
       callback: async ({ app, context: { markdownView, nativeInput: { clickElement, clickMouse, moveMouse, pressKey } }, focusTarget, inputKind, keyName, lib: { waitUntil } }) => {
-        if (focusTarget === 'popout') {
+        if (focusTarget.startsWith('popout')) {
           const popout = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
           popout.win.electronWindow.focus();
           await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === popout.doc && popout.doc.hasFocus() });
@@ -332,7 +333,9 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         pressKey({ key: 'Escape' });
         await waitForFocus('Escape did not leave the property input', () => !source.ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]'));
         const sourceRect = source.getBoundingClientRect();
-        clickMouse({ x: sourceRect.right - 30, y: sourceRect.top + 80 });
+        if (focusTarget !== 'popout-row') {
+          clickMouse({ x: sourceRect.right - 30, y: sourceRect.top + 80 });
+        }
         const doc = source.ownerDocument;
         const focusBeforeUndo = doc.activeElement?.className;
         const scrollTop = scroller.scrollTop;
@@ -342,7 +345,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         }
         scroller.addEventListener('scroll', measureScroll);
         pressKey({ key: 'z', modifiers: ['Ctrl'] });
-        await waitUntil({ message: 'Undo from editor padding failed', predicate: () => markdownView.editor.getValue().includes(before) });
+        await waitUntil({ message: `Undo failed with focus on ${String(focusBeforeUndo)}`, predicate: () => markdownView.editor.getValue().includes(before) });
         await new Promise<void>((resolve) => {
           doc.defaultView?.setTimeout(resolve, 2500);
         });
