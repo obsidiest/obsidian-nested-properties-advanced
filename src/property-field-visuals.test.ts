@@ -80,7 +80,7 @@ interface TestDocumentState {
   renderedSourceViews: Set<HTMLElement>;
   renderFrame: null;
   renderGeneration: number;
-  sourceHighlight: null;
+  sourceHighlight: HTMLElement | null;
   sourceModeObservers: Map<HTMLElement, MutationObserver>;
 }
 
@@ -111,6 +111,7 @@ interface TestPropertyFieldVisualsComponent {
   onKeyDown(ownerDocument: Document, event: KeyboardEvent): void;
   onPointerMove(ownerDocument: Document, event: PointerEvent): void;
   onPropertyEditorChanged(ownerDocument: Document, event: Event): void;
+  renderDocument(ownerDocument: Document): void;
   syncMetadataContainerListeners(ownerDocument: Document, state: TestDocumentState, containers: readonly HTMLElement[]): void;
 }
 
@@ -196,6 +197,50 @@ describe('getThreadDepthColorIndex', () => {
 });
 
 describe('property field visual render guards', () => {
+  it('should not let a previous document remove artifacts from an adopted editor', () => {
+    const component = castTo<TestPropertyFieldVisualsComponent>(
+      new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
+        app: { workspace: { iterateAllLeaves: vi.fn(), layoutReady: false } },
+        pluginSettingsComponent: { settings: new PluginSettings() }
+      }))
+    );
+    component.observeDocument(document);
+    const state = component.documentStates.get(document);
+    if (state === undefined) {
+      throw new Error('Expected document state');
+    }
+    const source = document.body.createDiv({ cls: 'markdown-source-view mod-cm6' });
+    const metadata = source.createDiv({ cls: 'metadata-container' });
+    const metadataOverlay = metadata.createDiv({ cls: 'np-property-tree-overlay' });
+    const sourceOverlay = source.createDiv({ cls: 'np-property-source-overlay' });
+    const line = source.createDiv({ cls: 'cm-line np-property-field-source-highlight', text: 'root: value' });
+    const frame = document.body.createEl('iframe');
+    frame.contentDocument?.body.append(source);
+    expect(source.ownerDocument).not.toBe(document);
+    state.renderedContainers.add(metadata);
+    state.renderedSourceViews.add(source);
+    state.sourceHighlight = line;
+    state.active = castTo<TestActiveField>({ kind: 'source', view: { containerEl: source } });
+
+    // A queued render for the old document can run after the destination has painted.
+    component.renderDocument(document);
+
+    expect(source.contains(sourceOverlay)).toBe(true);
+    expect(metadata.contains(metadataOverlay)).toBe(true);
+    expect(line.classList.contains('np-property-field-source-highlight')).toBe(true);
+    expect(state.renderedSourceViews.size).toBe(0);
+    expect(state.renderedContainers.size).toBe(0);
+    expect(state.active).toBeNull();
+    expect(state.sourceHighlight).toBeNull();
+    state.mutationObserver?.disconnect();
+    state.bodyStyleObserver?.disconnect();
+    for (const cleanup of state.cleanups) {
+      cleanup();
+    }
+    frame.remove();
+    component.documentStates.delete(document);
+  });
+
   it('should prioritize full-field then full-key then toggle-only breadcrumb activation', () => {
     expect(resolveBreadcrumbActivationScope(true, true)).toBe('field');
     expect(resolveBreadcrumbActivationScope(false, true)).toBe('key');
