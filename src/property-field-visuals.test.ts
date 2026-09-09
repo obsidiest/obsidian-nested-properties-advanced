@@ -233,7 +233,9 @@ describe('property field visual render guards', () => {
     sourceView.append(foreignSurface);
     expect(foreignSurface.ownerDocument).toBe(document);
     // Check native prototype identity; Obsidian's instanceOf helper intentionally hides this distinction.
-    expect(Object.getPrototypeOf(foreignSurface)).not.toBe(window.HTMLDivElement.prototype);
+    // Compare before invoking the matcher: DOM prototypes themselves have no Node internal slots.
+    const isOwnerPrototype = Object.getPrototypeOf(foreignSurface) === window.HTMLDivElement.prototype;
+    expect(isOwnerPrototype).toBe(false);
     vi.spyOn(container, 'isShown').mockReturnValue(true);
     vi.spyOn(sourceView, 'getBoundingClientRect').mockReturnValue({ bottom: 500, height: 500, left: 0, right: 1800, top: 0, width: 1800 } as DOMRect);
     vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({ bottom: 100, height: 100, left: 100, right: 900, top: 0, width: 800 } as DOMRect);
