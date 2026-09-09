@@ -5,8 +5,13 @@ import {
 } from '@codemirror/commands';
 import {
   EditorState,
+  StateEffect,
   Transaction
 } from '@codemirror/state';
+import {
+  Decoration,
+  EditorView
+} from '@codemirror/view';
 import { castTo } from 'obsidian-dev-utils/object-utils';
 import {
   describe,
@@ -55,14 +60,11 @@ import {
   resolveSourceLineElementAtPointer,
   scrollElementWithinContainer
 } from './property-field-visuals.ts';
+import { sourceFieldHighlightState } from './source-field-highlight.ts';
 
 interface TestActiveField {
   element: HTMLElement;
   kind: string;
-}
-
-interface TestDocumentLine {
-  number: number;
 }
 
 interface TestDocumentState {
@@ -80,13 +82,8 @@ interface TestDocumentState {
   renderedSourceViews: Set<HTMLElement>;
   renderFrame: null;
   renderGeneration: number;
-  sourceHighlight: HTMLElement | null;
+  sourceHighlight: EditorView | null;
   sourceModeObservers: Map<HTMLElement, MutationObserver>;
-}
-
-interface TestDocumentTextLine {
-  from: number;
-  text: string;
 }
 
 interface TestEditorPosition {
@@ -100,10 +97,12 @@ interface TestPointerCoordinates {
 }
 
 interface TestPropertyFieldVisualsComponent {
+  clearSourceHighlight(ownerDocument: Document, state: TestDocumentState): void;
   codeMirrorViews: Set<unknown>;
   documentStates: Map<Document, TestDocumentState>;
   findCodeMirrorView(element: Element): unknown;
   findMarkdownView(ownerDocument: Document, target: EventTarget | null): unknown;
+  highlightSourceLine(ownerDocument: Document, line: HTMLElement): void;
   observeDocument(ownerDocument: Document): void;
   onCodeMirrorUpdate(update: unknown): void;
   onFocusIn(ownerDocument: Document, event: FocusEvent): void;
@@ -197,6 +196,43 @@ describe('getThreadDepthColorIndex', () => {
 });
 
 describe('property field visual render guards', () => {
+  it('should retain the Source marker when CodeMirror redraws its own line attributes', () => {
+    const instance = new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
+      app: { workspace: { iterateAllLeaves: vi.fn(), layoutReady: false } },
+      pluginSettingsComponent: { settings: new PluginSettings() }
+    }));
+    const component = castTo<TestPropertyFieldVisualsComponent>(instance);
+    const source = document.body.createDiv({ cls: 'markdown-source-view mod-cm6' });
+    const view = new EditorView({ doc: 'root: value\nnext: value', extensions: [instance.createEditorExtension()], parent: source });
+    try {
+      const line = view.contentDOM.querySelector<HTMLElement>('.cm-line');
+      if (line === null) {
+        throw new Error('Expected a real CodeMirror line');
+      }
+      component.highlightSourceLine(document, line);
+      expect(line.classList.contains('np-property-field-source-highlight')).toBe(true);
+      // Native editor reconfiguration replaces line attributes. External classList
+      // Writes are discarded; only decorations participate in CodeMirror's redraw.
+      const nativeDecoration = Decoration.set([Decoration.line({ class: 'native-line-attribute' }).range(0)]);
+      view.dispatch({ effects: StateEffect.appendConfig.of(EditorView.decorations.of(nativeDecoration)) });
+      const rendered = view.contentDOM.querySelector<HTMLElement>('.cm-line');
+      expect(rendered?.classList.contains('native-line-attribute')).toBe(true);
+      expect(rendered?.classList.contains('np-property-field-source-highlight')).toBe(true);
+      view.dispatch({ changes: { from: 0, insert: 'before: value\n' } });
+      expect(view.contentDOM.querySelector('.np-property-field-source-highlight')?.textContent).toBe('root: value');
+      const state = component.documentStates.get(document);
+      if (state === undefined) {
+        throw new Error('Expected the registered editor document');
+      }
+      component.clearSourceHighlight(document, state);
+      expect(view.contentDOM.querySelector('.np-property-field-source-highlight')).toBeNull();
+    } finally {
+      view.destroy();
+      instance.onunload();
+      source.remove();
+    }
+  });
+
   it('should not let a previous document remove artifacts from an adopted editor', () => {
     const component = castTo<TestPropertyFieldVisualsComponent>(
       new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
@@ -219,7 +255,7 @@ describe('property field visual render guards', () => {
     expect(source.ownerDocument).not.toBe(document);
     state.renderedContainers.add(metadata);
     state.renderedSourceViews.add(source);
-    state.sourceHighlight = line;
+    state.sourceHighlight = castTo<EditorView>({ dom: source });
     state.active = castTo<TestActiveField>({ kind: 'source', view: { containerEl: source } });
 
     // A queued render for the old document can run after the destination has painted.
@@ -495,19 +531,13 @@ describe('property field visual render guards', () => {
     const codeMirrorView = {
       contentDOM: content,
       coordsAtPos: (): DOMRect => ({ bottom: 40, height: 20, left: 120, right: 120, top: 20, width: 0 } as DOMRect),
+      dispatch: (spec: Parameters<EditorState['update']>[0]): void => {
+        codeMirrorView.state = codeMirrorView.state.update(spec).state;
+      },
       dom: content,
       posAtCoords: ({ y }: TestPointerCoordinates): number => y < 50 ? source.indexOf('root:') : source.indexOf('root.child'),
       posAtDOM: (lineElement: HTMLElement): number => lineElement === rootLine ? source.indexOf('root:') : source.indexOf('root.child'),
-      state: {
-        doc: {
-          line: (number: number): TestDocumentTextLine =>
-            number === 2
-              ? { from: source.indexOf('root:'), text: 'root: value' }
-              : { from: source.indexOf('root.child'), text: 'root.child: value' },
-          lineAt: (position: number): TestDocumentLine => ({ number: position === source.indexOf('root:') ? 2 : 3 }),
-          toString: (): string => source
-        }
-      }
+      state: EditorState.create({ doc: source, extensions: [sourceFieldHighlightState] })
     };
     component.codeMirrorViews.add(codeMirrorView);
     sourceView.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 980, clientY: 30 }));
@@ -516,13 +546,13 @@ describe('property field visual render guards', () => {
     expect(state.hoveredBreadcrumbField).toBe(rootLine);
     expect(state.hoveredThreadingField).toBe(rootLine);
     expect(state.popover?.classList.contains('np-property-breadcrumb-popover')).toBe(true);
-    expect(rootLine.classList.contains('np-property-field-source-highlight')).toBe(true);
+    expect(codeMirrorView.state.field(sourceFieldHighlightState)).toBe(source.indexOf('root:'));
 
     sourceView.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 980, clientY: 60 }));
     expect(state.active).toMatchObject({ kind: 'source', line: 2 });
     expect(state.hoveredBreadcrumbField).toBe(flattenedLine);
     expect(state.hoveredThreadingField).toBe(flattenedLine);
-    expect(flattenedLine.classList.contains('np-property-field-source-highlight')).toBe(true);
+    expect(codeMirrorView.state.field(sourceFieldHighlightState)).toBe(source.indexOf('root.child'));
     expect(scrollIntoView).not.toHaveBeenCalled();
     state.mutationObserver?.disconnect();
     state.bodyStyleObserver?.disconnect();
@@ -736,7 +766,7 @@ describe('property field visual render guards', () => {
     expect(isUndoShortcut({ altKey: false, ctrlKey: false, key: 'z', metaKey: true, shiftKey: false })).toBe(false);
   });
 
-  it('should hide and fully remove Source-owned visuals without removing Live Preview tree overlays', () => {
+  it('should remove Source overlays while leaving CodeMirror line attributes to its decoration state', () => {
     const sourceView = document.body.createDiv({ cls: ['markdown-source-view', 'np-property-source-overlay-host'] });
     const sourceOverlay = sourceView.createSvg('svg', { cls: 'np-property-source-overlay' });
     const sourceLine = sourceView.createDiv({ cls: 'np-property-field-source-highlight' });
@@ -747,7 +777,7 @@ describe('property field visual render guards', () => {
     expect(sourceOverlay.classList.contains('np-property-source-overlay-hidden')).toBe(true);
     removeSourceViewVisualArtifacts(sourceView);
     expect(sourceOverlay.isConnected).toBe(false);
-    expect(sourceLine.classList.contains('np-property-field-source-highlight')).toBe(false);
+    expect(sourceLine.classList.contains('np-property-field-source-highlight')).toBe(true);
     expect(sourceView.classList.contains('np-property-source-overlay-host')).toBe(false);
     expect(metadataOverlay.isConnected).toBe(true);
 

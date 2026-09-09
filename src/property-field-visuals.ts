@@ -34,6 +34,10 @@ import {
   type PropertyFieldNode,
   type SourcePropertyFieldNode
 } from './property-field-tree.ts';
+import {
+  sourceFieldHighlightEffect,
+  sourceFieldHighlightState
+} from './source-field-highlight.ts';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const POPOVER_HIDE_DELAY_IN_MILLISECONDS = 120;
@@ -83,7 +87,7 @@ interface DocumentState {
   renderedSourceViews: Set<HTMLElement>;
   renderFrame: number | null;
   renderGeneration: number;
-  sourceHighlight: HTMLElement | null;
+  sourceHighlight: EditorView | null;
   sourceModeObservers: Map<HTMLElement, MutationObserver>;
 }
 
@@ -203,6 +207,7 @@ export class PropertyFieldVisualsComponent extends Component {
    */
   public createEditorExtension(): Extension {
     return [
+      sourceFieldHighlightState,
       EditorView.scrollHandler.of((view) => this.propertyHistoryScrollViews.has(view) && getCodeMirrorSourceView(view)?.classList.contains('is-live-preview') === true),
       ViewPlugin.define((view) => {
         const scrollListener = (): void => this.onCodeMirrorScroll(view);
@@ -709,7 +714,7 @@ export class PropertyFieldVisualsComponent extends Component {
     if (!this.pluginSettingsComponent.settings.isActiveCursorPropertyFieldThreadingEnabled && state.active?.kind === 'source' && state.active.view.containerEl.contains(sourceView)) {
       state.active = null;
     }
-    if (state.sourceHighlight?.closest('.markdown-source-view') === sourceView) {
+    if (state.sourceHighlight !== null && getCodeMirrorSourceView(state.sourceHighlight) === sourceView) {
       this.clearSourceHighlight(ownerDocument, state);
     }
     this.scheduleRender(ownerDocument);
@@ -1036,7 +1041,7 @@ export class PropertyFieldVisualsComponent extends Component {
       state.hoveredBreadcrumbField = null;
       this.dismissPopover(state);
     }
-    if (state.sourceHighlight !== null && (!state.sourceHighlight.isConnected || state.sourceHighlight.ownerDocument !== ownerDocument || detectViewMode(state.sourceHighlight) !== 'source')) {
+    if (state.sourceHighlight !== null && shownSourceViews.every((sourceView) => !sourceView.contains(state.sourceHighlight?.dom ?? null))) {
       this.clearSourceHighlight(ownerDocument, state);
     }
     if (state.lastPropertyEditorView !== null && state.lastPropertyEditorView.containerEl.ownerDocument !== ownerDocument) {
@@ -1636,23 +1641,26 @@ export class PropertyFieldVisualsComponent extends Component {
 
   private highlightSourceLine(ownerDocument: Document, line: HTMLElement): void {
     const state = this.documentStates.get(ownerDocument);
-    if (state === undefined || line.ownerDocument !== ownerDocument) {
+    const view = this.findCodeMirrorView(line);
+    if (state === undefined || view === null || line.ownerDocument !== ownerDocument) {
       return;
     }
-    if (state.sourceHighlight !== line) {
+    if (state.sourceHighlight !== view) {
       this.clearSourceHighlight(ownerDocument, state);
     }
-    if (!line.classList.contains('np-property-field-source-highlight')) {
-      line.classList.add('np-property-field-source-highlight');
+    state.sourceHighlight = view;
+    const position = view.state.doc.lineAt(view.posAtDOM(line, 0)).from;
+    if (view.state.field(sourceFieldHighlightState) !== position) {
+      view.dispatch({ effects: sourceFieldHighlightEffect.of(position) });
     }
-    state.sourceHighlight = line;
   }
 
   private clearSourceHighlight(ownerDocument: Document, state: DocumentState): void {
-    if (state.sourceHighlight?.ownerDocument === ownerDocument) {
-      state.sourceHighlight.classList.remove('np-property-field-source-highlight');
-    }
+    const view = state.sourceHighlight;
     state.sourceHighlight = null;
+    if (view?.dom.ownerDocument === ownerDocument && this.codeMirrorViews.has(view) && view.state.field(sourceFieldHighlightState) !== null) {
+      view.dispatch({ effects: sourceFieldHighlightEffect.of(null) });
+    }
   }
 
   private highlightVisibleSourceLine(ownerDocument: Document, view: MarkdownView, lineNumber: number): void {
@@ -1992,8 +2000,8 @@ function removeVisualArtifacts(ownerDocument: Document): void {
   for (const element of ownerDocument.querySelectorAll('.np-property-tree-overlay, .np-property-source-overlay, .np-property-breadcrumb-popover')) {
     element.remove();
   }
-  for (const element of ownerDocument.querySelectorAll<HTMLElement>('.np-property-tree-node, .np-property-field-active, .np-property-field-popover-highlight, .np-property-field-source-highlight')) {
-    element.classList.remove('np-property-tree-node', 'np-property-field-active', 'np-property-field-popover-highlight', 'np-property-field-source-highlight');
+  for (const element of ownerDocument.querySelectorAll<HTMLElement>('.np-property-tree-node, .np-property-field-active, .np-property-field-popover-highlight')) {
+    element.classList.remove('np-property-tree-node', 'np-property-field-active', 'np-property-field-popover-highlight');
     element.style.removeProperty('--np-property-depth');
   }
   for (const element of ownerDocument.querySelectorAll('.np-property-source-overlay-host')) {
@@ -2008,9 +2016,6 @@ export function hideSourceViewOverlay(sourceView: HTMLElement): void {
 export function removeSourceViewVisualArtifacts(sourceView: HTMLElement): void {
   sourceView.querySelector(':scope > .np-property-source-overlay')?.remove();
   sourceView.classList.remove('np-property-source-overlay-host');
-  for (const element of sourceView.querySelectorAll('.np-property-field-source-highlight')) {
-    element.classList.remove('np-property-field-source-highlight');
-  }
 }
 
 export function removeMetadataContainerVisualArtifacts(container: HTMLElement): void {
