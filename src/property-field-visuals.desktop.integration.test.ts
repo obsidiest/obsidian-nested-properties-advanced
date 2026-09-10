@@ -189,6 +189,7 @@ describe('property-field visuals in real Obsidian', () => {
               `${message}: ${
                 JSON.stringify({
                   active: activeSource.ownerDocument.activeElement?.outerHTML.slice(0, 500),
+                  dialogs: [...ownerDocument.querySelectorAll('[role="dialog"], .modal-container')].map((element) => element.outerHTML.slice(0, 500)),
                   focusTrace,
                   inputConnected: editedInput.isConnected,
                   pointerTarget: activeSource.ownerDocument.elementFromPoint((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2)?.outerHTML.slice(0, 500)

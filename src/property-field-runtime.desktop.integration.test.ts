@@ -321,7 +321,14 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           }
           input.scrollIntoView({ block: 'center' });
           clickElement({ element: input });
+          await waitUntil({ message: 'Native timeout input did not receive focus', predicate: () => input.ownerDocument.activeElement === input });
           pressKey({ key: 'a', modifiers: ['Ctrl'] });
+          const trace: object[] = [];
+          for (const eventName of ['keydown', 'input', 'blur']) {
+            input.addEventListener(eventName, (event) => {
+              trace.push({ key: (event as KeyboardEvent).key, type: event.type, value: input.value });
+            });
+          }
           for (const key of '2.75') {
             pressKey({ key });
             await new Promise<void>((resolve) => {
@@ -329,7 +336,11 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
             });
           }
           pressKey({ key: 'Enter' });
-          await waitUntil({ predicate: () => settingsTab.getControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds') === 2.75 });
+          try {
+            await waitUntil({ predicate: () => settingsTab.getControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds') === 2.75 });
+          } catch (error) {
+            throw new Error(`Native timeout entry failed: ${JSON.stringify({ active: input.ownerDocument.activeElement?.outerHTML.slice(0, 500), input: input.outerHTML, persisted: settingsTab.getControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds'), trace, value: input.value })}`, { cause: error });
+          }
           const value = input.value;
           const isSameInput = findInput(settingsTab) === input && input.isConnected;
           const type = input.type;
