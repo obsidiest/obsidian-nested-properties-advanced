@@ -45,6 +45,10 @@ interface RuntimeContext {
   showViewHeader: unknown;
   theme: string;
 }
+interface SettingsWindowConfig {
+  getConfig(key: 'settingsPopoutWindow'): boolean;
+  setConfig(key: 'settingsPopoutWindow', isEnabled: boolean): void;
+}
 const contextId = new ContextId<RuntimeContext>();
 const FIXTURE = `---
 root: original
@@ -305,9 +309,13 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
     expect(result).toEqual({ individualOverride: true, navigated: true, sameAfterGap: true, staysInside: true });
   });
 
-  it('keeps decimal timeout input mounted through typing, Enter, and plugin reload', async () => {
+  it.each([false, true])('keeps decimal timeout input mounted through typing, Enter, and plugin reload with settings popout=%s', async (isSettingsPopout) => {
     const result = await evalInObsidian({
-      callback: async ({ app, context: { nativeInput: { clickElement, pressKey }, settingsTab }, lib: { waitUntil } }) => {
+      callback: async ({ app, context: { markdownView, settingsTab }, lib: { waitUntil }, settingsPopout }) => {
+        // Obsidian 1.13.7 supports this setting, but ConfigItem omits it.
+        const windowConfig = app.vault as SettingsWindowConfig & typeof app.vault;
+        const wasSettingsPopout = windowConfig.getConfig('settingsPopoutWindow');
+        windowConfig.setConfig('settingsPopoutWindow', settingsPopout);
         app.setting.open();
         app.setting.openTabById('nested-properties-advanced');
         function findInput(tab: PluginSettingTab): HTMLInputElement | null {
@@ -319,10 +327,28 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           if (input === null) {
             throw new Error('Timeout number control missing');
           }
+          // Settings can own a separate native window from the note. Sending these
+          // Events to the note's webContents never reaches the visible number input.
+          const owner = input.win;
+          owner.electronWindow.focus();
+          await waitUntil({ predicate: () => input.ownerDocument.hasFocus() });
+          function send(event: Parameters<Window['electronWindow']['webContents']['sendInputEvent']>[0]): void {
+            owner.electronWindow.webContents.sendInputEvent(event);
+          }
+          function pressKey(key: string, isControl = false): void {
+            for (const type of ['keyDown', 'char', 'keyUp'] as const) {
+              send({ keyCode: key, modifiers: isControl ? ['control'] : [], type });
+            }
+          }
           input.scrollIntoView({ block: 'center' });
-          clickElement({ element: input });
+          const rect = input.getBoundingClientRect();
+          const point = { x: Math.round((rect.left + rect.right) / 2), y: Math.round((rect.top + rect.bottom) / 2) };
+          send({ type: 'mouseMove', ...point });
+          for (const type of ['mouseDown', 'mouseUp'] as const) {
+            send({ button: 'left', clickCount: 1, type, ...point });
+          }
           await waitUntil({ message: 'Native timeout input did not receive focus', predicate: () => input.ownerDocument.activeElement === input });
-          pressKey({ key: 'a', modifiers: ['Ctrl'] });
+          pressKey('a', true);
           const trace: object[] = [];
           for (const eventName of ['keydown', 'input', 'blur']) {
             input.addEventListener(eventName, (event) => {
@@ -330,12 +356,12 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
             });
           }
           for (const key of '2.75') {
-            pressKey({ key });
+            pressKey(key);
             await new Promise<void>((resolve) => {
               input.win.setTimeout(resolve, 40);
             });
           }
-          pressKey({ key: 'Enter' });
+          pressKey('Enter');
           try {
             await waitUntil({ predicate: () => settingsTab.getControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds') === 2.75 });
           } catch (error) {
@@ -343,6 +369,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           }
           const value = input.value;
           const isSameInput = findInput(settingsTab) === input && input.isConnected;
+          const isSeparateWindow = input.ownerDocument !== markdownView.containerEl.ownerDocument;
           const type = input.type;
           app.setting.close();
           await app.plugins.disablePlugin('nested-properties-advanced');
@@ -351,15 +378,17 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           if (reloaded === undefined) {
             throw new Error('Reloaded settings missing');
           }
-          return { persisted: reloaded.getControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds'), sameInput: isSameInput, type, value };
+          return { persisted: reloaded.getControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds'), sameInput: isSameInput, settingsPopout: isSeparateWindow, type, value };
         } finally {
           app.setting.close();
+          windowConfig.setConfig('settingsPopoutWindow', wasSettingsPopout);
         }
       },
       contextId,
+      input: { settingsPopout: isSettingsPopout },
       vaultPath: vault.path
     });
-    expect(result).toEqual({ persisted: 2.75, sameInput: true, type: 'number', value: '2.75' });
+    expect(result).toEqual({ persisted: 2.75, sameInput: true, settingsPopout: isSettingsPopout, type: 'number', value: '2.75' });
   });
 
   it.each([false, true].flatMap((isSource) => ['main', 'popout', 'reload', 'popout-reload'].map((lifecycle) => ({ isSource, lifecycle }))))('sweeps root, flattened and nested rows with Source=$isSource after $lifecycle', async ({ isSource, lifecycle }) => {
