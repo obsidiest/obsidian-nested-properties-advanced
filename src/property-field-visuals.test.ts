@@ -35,10 +35,12 @@ import {
   getShownSourceViews,
   getSourceKeyActivationRects,
   getSourceKeyCharacterRange,
+  getSourcePropertyGutterRects,
   getThreadDepthColorIndex,
   hideSourceViewOverlay,
   isContainerRenderCurrent,
   isFrontmatterOnlyChange,
+  isPointerBetweenPopoverAndAnchor,
   isPointerWithinActivationRegion,
   isPropertyFieldMutation,
   isPropertyVisualStyleMutation,
@@ -55,7 +57,6 @@ import {
   resolveCodeMirrorLineElementAtPointer,
   resolveDomBreadcrumbPropertyAtPointer,
   resolveDomPropertyAtPointer,
-  resolveSourceBreadcrumbLineAtPointer,
   resolveSourceLine,
   resolveSourceLineElementAtPointer,
   scrollElementWithinContainer
@@ -196,6 +197,28 @@ describe('getThreadDepthColorIndex', () => {
 });
 
 describe('property field visual render guards', () => {
+  it('should place the gutter before indented YAML text and only on its first wrapped row', () => {
+    const line = document.body.createDiv({ text: '    leaf: value' });
+    vi.spyOn(line, 'getBoundingClientRect').mockReturnValue({ bottom: 80, height: 60, left: 40, right: 700, top: 20, width: 660 } as DOMRect);
+    const view = {
+      coordsAtPos: vi.fn(() => ({ bottom: 38, left: 120, right: 120, top: 22 } as DOMRect)),
+      defaultLineHeight: 22,
+      state: EditorState.create({ doc: '    leaf: value' })
+    };
+    expect(getSourcePropertyGutterRects(view, line, 0)).toEqual([{ bottom: 41, left: 98, right: 120, top: 20 }]);
+    expect(view.coordsAtPos).toHaveBeenCalledWith(4, 1);
+    line.remove();
+  });
+
+  it.each([false, true])('should bridge only the gap to a popover positioned above=%s', (above) => {
+    const anchor = { bottom: 100, left: 100, right: 300, top: 80 };
+    const popover = { bottom: above ? 70 : 210, left: 100, right: 500, top: above ? 10 : 110 };
+    expect(isPointerBetweenPopoverAndAnchor(anchor, popover, 150, above ? 75 : 105)).toBe(true);
+    expect(isPointerBetweenPopoverAndAnchor(anchor, popover, 600, above ? 75 : 105)).toBe(false);
+    expect(isPointerBetweenPopoverAndAnchor(anchor, popover, 150, 90)).toBe(false);
+    expect(isPointerBetweenPopoverAndAnchor(anchor, popover, 150, above ? 20 : 120)).toBe(false);
+  });
+
   it('should retain the Source marker when CodeMirror redraws its own line attributes', () => {
     const instance = new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
       app: { workspace: { iterateAllLeaves: vi.fn(), layoutReady: false } },
@@ -494,11 +517,12 @@ describe('property field visual render guards', () => {
     container.remove();
   });
 
-  it('should activate Source breadcrumb and threading for root and flattened properties across the source-view width', () => {
+  it.each(['field', 'key', 'toggle'])('should activate Source root and flattened leaf gutters with %s scope', (scope) => {
     const scrollIntoView = vi.fn();
     Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView });
     const settings = new PluginSettings();
-    settings.isFullWidthPropertyFieldHoverActivationEnabled = true;
+    settings.isFullWidthPropertyFieldHoverActivationEnabled = scope === 'field';
+    settings.isFullWidthPropertyKeyHoverActivationEnabled = scope === 'key';
     settings.isPropertyFieldThreadingEnabled = true;
     const component = castTo<TestPropertyFieldVisualsComponent>(
       new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
@@ -530,7 +554,13 @@ describe('property field visual render guards', () => {
     component.findMarkdownView = (): unknown => view;
     const codeMirrorView = {
       contentDOM: content,
-      coordsAtPos: (): DOMRect => ({ bottom: 40, height: 20, left: 120, right: 120, top: 20, width: 0 } as DOMRect),
+      coordsAtPos: (position: number): DOMRect => {
+        const line = codeMirrorView.state.doc.lineAt(position);
+        const left = 20 + (position - line.from) * 8;
+        const top = line.number === 2 ? 20 : 50;
+        return { bottom: top + 20, height: 20, left, right: left, top, width: 0 } as DOMRect;
+      },
+      defaultLineHeight: 20,
       dispatch: (spec: Parameters<EditorState['update']>[0]): void => {
         codeMirrorView.state = codeMirrorView.state.update(spec).state;
       },
@@ -540,7 +570,8 @@ describe('property field visual render guards', () => {
       state: EditorState.create({ doc: source, extensions: [sourceFieldHighlightState] })
     };
     component.codeMirrorViews.add(codeMirrorView);
-    sourceView.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 980, clientY: 30 }));
+    const clientX = scope === 'field' ? 980 : 10;
+    sourceView.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX, clientY: 30 }));
 
     expect(state.active).toMatchObject({ kind: 'source', line: 1 });
     expect(state.hoveredBreadcrumbField).toBe(rootLine);
@@ -548,7 +579,7 @@ describe('property field visual render guards', () => {
     expect(state.popover?.classList.contains('np-property-breadcrumb-popover')).toBe(true);
     expect(codeMirrorView.state.field(sourceFieldHighlightState)).toBe(source.indexOf('root:'));
 
-    sourceView.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 980, clientY: 60 }));
+    sourceView.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX, clientY: 60 }));
     expect(state.active).toMatchObject({ kind: 'source', line: 2 });
     expect(state.hoveredBreadcrumbField).toBe(flattenedLine);
     expect(state.hoveredThreadingField).toBe(flattenedLine);
@@ -622,7 +653,7 @@ describe('property field visual render guards', () => {
     container.remove();
   });
 
-  it('should deactivate key-only and icon-only breadcrumbs as soon as their activation target is left', () => {
+  it('should leave key/icon activation immediately but retain the popover for one non-renewing timeout', () => {
     vi.useFakeTimers();
     Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
     const settings = new PluginSettings();
@@ -660,8 +691,12 @@ describe('property field visual render guards', () => {
     expect(state.hoveredBreadcrumbField).toBe(property);
     sourceView.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 800, clientY: 30 }));
     expect(state.hoveredBreadcrumbField).toBeNull();
-    expect(state.popover).toBeNull();
-    vi.advanceTimersByTime(121);
+    expect(state.popover).not.toBeNull();
+    vi.advanceTimersByTime(900);
+    sourceView.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 850, clientY: 30 }));
+    vi.advanceTimersByTime(99);
+    expect(state.popover).not.toBeNull();
+    vi.advanceTimersByTime(1);
     expect(state.popover).toBeNull();
 
     settings.isFullWidthPropertyKeyHoverActivationEnabled = false;
@@ -673,8 +708,10 @@ describe('property field visual render guards', () => {
     expect(state.popover).not.toBeNull();
     key.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 100, clientY: 30 }));
     expect(state.hoveredBreadcrumbField).toBeNull();
-    expect(state.popover).toBeNull();
+    expect(state.popover).not.toBeNull();
     vi.advanceTimersByTime(121);
+    expect(state.popover).not.toBeNull();
+    vi.advanceTimersByTime(879);
     expect(state.popover).toBeNull();
 
     state.mutationObserver?.disconnect();
@@ -708,35 +745,6 @@ describe('property field visual render guards', () => {
     expect(getSourceKeyCharacterRange('  "quoted:key": value')).toEqual({ end: 15, start: 2 });
     expect(getSourceKeyCharacterRange('flow[key:part]: value')).toEqual({ end: 15, start: 0 });
     expect(getSourceKeyCharacterRange('not a mapping')).toBeNull();
-  });
-
-  it('should apply full-field, key-range, and fold-toggle Source activation scopes', () => {
-    const sourceView = document.body.createDiv({ cls: 'markdown-source-view mod-cm6' });
-    const content = sourceView.createDiv({ cls: 'cm-content' });
-    const line = content.createDiv({ cls: 'cm-line', text: 'root: value' });
-    const collapseIndicator = line.createDiv({ cls: 'collapse-indicator' });
-    const foldGutter = sourceView.createDiv({ cls: 'cm-foldGutter' });
-    const foldToggle = foldGutter.createDiv({ cls: 'cm-gutterElement', text: '⌄' });
-    const emptyGutter = foldGutter.createDiv({ cls: 'cm-gutterElement' });
-    vi.spyOn(line, 'getBoundingClientRect').mockReturnValue({ bottom: 40, height: 20, left: 10, right: 800, top: 20, width: 790 } as DOMRect);
-    vi.spyOn(collapseIndicator, 'getBoundingClientRect').mockReturnValue({ bottom: 40, height: 20, left: 10, right: 30, top: 20, width: 20 } as DOMRect);
-    vi.spyOn(foldToggle, 'getBoundingClientRect').mockReturnValue({ bottom: 40, height: 20, left: 490, right: 510, top: 20, width: 20 } as DOMRect);
-    const createRange = vi.spyOn(document, 'createRange').mockReturnValue(castTo<Range>({
-      getBoundingClientRect: () => ({ left: 10, right: 70, width: 60 }),
-      getClientRects: () => [],
-      setEnd: vi.fn(),
-      setStart: vi.fn()
-    }));
-
-    expect(resolveSourceBreadcrumbLineAtPointer(sourceView, 500, 30, 'field')).toBe(line);
-    expect(resolveSourceBreadcrumbLineAtPointer(line, 40, 30, 'key')).toBe(line);
-    expect(resolveSourceBreadcrumbLineAtPointer(line, 90, 30, 'key')).toBeNull();
-    expect(resolveSourceBreadcrumbLineAtPointer(foldToggle, 500, 30, 'toggle')).toBe(line);
-    expect(resolveSourceBreadcrumbLineAtPointer(emptyGutter, 500, 30, 'toggle')).toBeNull();
-    expect(resolveSourceBreadcrumbLineAtPointer(line, 20, 30, 'toggle')).toBe(line);
-    expect(resolveSourceBreadcrumbLineAtPointer(line, 90, 30, 'toggle')).toBeNull();
-    createRange.mockRestore();
-    sourceView.remove();
   });
 
   it('should resolve only lines owned by the active CodeMirror viewport', () => {

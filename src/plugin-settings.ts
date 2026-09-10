@@ -1,6 +1,9 @@
+import { DEFAULT_HOVER_BREADCRUMB_TIMEOUT_SECONDS } from './hover-breadcrumb-timeout.ts';
+
 export class PluginSettings {
   public allNestedPropertiesExpansionStateByNote: Record<string, boolean> = {};
   public fullKeyNamesExpansionStateByNote: Record<string, boolean> = {};
+  public globalHoverBreadcrumbPopoverTimeoutSeconds = DEFAULT_HOVER_BREADCRUMB_TIMEOUT_SECONDS;
   public isActiveCursorPropertyFieldThreadingEnabled = false;
   public isActivePropertyFieldThreadingEnabled = true;
   public isActivePropertyFieldThreadingInHoverBreadcrumbEnabled = true;
@@ -15,6 +18,9 @@ export class PluginSettings {
   public isAllBranchesOfActiveRootLevelPropertyFieldTreeThreadingEnabled = false;
   public isAllBranchesOfActiveRootLevelPropertyFieldTreeThreadingInHoverBreadcrumbEnabled = true;
   public isAllBranchesOfActiveRootLevelPropertyFieldTreeThreadingInMainUiEnabled = true;
+  public isControlLivePreviewModeHoverBreadcrumbTimeoutIndividuallyEnabled = false;
+  public isControlReadingModeHoverBreadcrumbTimeoutIndividuallyEnabled = false;
+  public isControlSourceModeHoverBreadcrumbTimeoutIndividuallyEnabled = false;
   public isFullPropertyFieldNameExpansionInHoverBreadcrumbEnabled = true;
   public isFullWidthPropertyFieldHoverActivationEnabled = false;
   public isFullWidthPropertyKeyHoverActivationEnabled = true;
@@ -22,6 +28,7 @@ export class PluginSettings {
   public isGlobalCollapseFullKeyNamesEnabled = false;
   public isGlobalExpandAllNestedPropertiesEnabled = true;
   public isGlobalExpandFullKeyNamesEnabled = true;
+  public isGloballyControlHoverBreadcrumbTimeoutEnabled = true;
   public isGlobalToggleAllNestedPropertiesEnabled = true;
   public isGlobalToggleFullKeyNamesEnabled = true;
   public isHighlightActivePropertyFieldTreeEnabled = false;
@@ -45,4 +52,7 @@ export class PluginSettings {
   public isRememberAllNestedPropertiesExpansionToggleStateEnabled = true;
   public isRememberFullKeyNamesExpansionToggleStateEnabled = true;
   public isRememberLastUsedMainUiToggleStatesEnabled = true;
+  public livePreviewModeHoverBreadcrumbTimeoutSeconds = DEFAULT_HOVER_BREADCRUMB_TIMEOUT_SECONDS;
+  public readingModeHoverBreadcrumbTimeoutSeconds = DEFAULT_HOVER_BREADCRUMB_TIMEOUT_SECONDS;
+  public sourceModeHoverBreadcrumbTimeoutSeconds = DEFAULT_HOVER_BREADCRUMB_TIMEOUT_SECONDS;
 }

@@ -57,7 +57,7 @@ interface RendererWithToggle {
 }
 
 interface SettingTabWithCallback {
-  onSettingsChanged(): void;
+  onSettingsChanged(key: string, value: boolean | number): void;
 }
 
 interface VaultOpsWithCommands {
@@ -340,11 +340,14 @@ describe('Plugin', () => {
 
       expect(lifecycleMocks.start).toHaveBeenCalledWith(lifecycleMocks.documents);
       const settingTab = castTo<SettingTabWithCallback>(addSettingTabSpy.mock.calls[0]?.[0]);
-      settingTab.onSettingsChanged();
+      settingTab.onSettingsChanged('isPropertyFieldHoverBreadcrumbEnabled', true);
       const renderer = castTo<RendererWithToggle>(instanceOf(MockNestedPropertyRendererComponent));
       const visuals = castTo<VisualsWithRefresh>(instanceOf(MockPropertyFieldVisualsComponent));
       expect(renderer.refreshSettings).toHaveBeenCalledTimes(1);
       expect(visuals.refresh).toHaveBeenCalledTimes(1);
+      settingTab.onSettingsChanged('globalHoverBreadcrumbPopoverTimeoutSeconds', 1.25);
+      expect(renderer.refreshSettings).toHaveBeenCalledTimes(1);
+      expect(visuals.refresh).toHaveBeenCalledTimes(2);
 
       const windowOpenCall = workspaceOnSpy.mock.calls.find((call) => call[0].startsWith('window-'));
       const openedDocument = castTo<Document>({ id: 'opened-document' });

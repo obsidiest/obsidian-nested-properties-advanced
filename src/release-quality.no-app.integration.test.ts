@@ -45,9 +45,9 @@ describe('property field feature release quality', () => {
   it('should expose every persisted setting through the searchable settings tab', () => {
     const settingsSource = readRepoFile('src/plugin-settings.ts');
     const settingTabSource = readRepoFile('src/plugin-setting-tab.ts');
-    const settingKeys = [...settingsSource.matchAll(/public (?<key>is\w+) =/gu)].map((match) => match.groups?.['key']).filter((settingKey): settingKey is string => settingKey !== undefined);
+    const settingKeys = [...settingsSource.matchAll(/public (?<key>\w+) =/gu)].map((match) => match.groups?.['key']).filter((settingKey): settingKey is string => settingKey !== undefined);
 
-    expect(settingKeys).toHaveLength(44);
+    expect(settingKeys).toHaveLength(52);
     for (const settingKey of settingKeys) {
       expect(settingTabSource).toContain(`'${settingKey}'`);
     }

@@ -2,6 +2,10 @@
 
 ## 2.0.0
 
+- feat: add searchable global and per-mode hover breadcrumb timeout controls with precise decimal-second inputs and individual override precedence
+- fix: activate Source-mode leaf and parent fold gutters independently of full-field and full-key activation toggles
+- fix: preserve the current breadcrumb across the pointer-travel gap and apply one dismissal timer to ordinary field and popover exits
+
 - fix: bind Live Preview metadata hit testing directly to every Properties editor and isolate Source hit testing to its owning CodeMirror view so full-row threading and exact breadcrumb scopes activate and deactivate reliably
 - fix: keep captured Live Preview property redo state through the metadata rerender after Ctrl+Z, preserve editor scroll in both editing modes, and confine breadcrumb scrolling to the popover itself
 

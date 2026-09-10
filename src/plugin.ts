@@ -46,8 +46,10 @@ export class Plugin extends PluginBase {
     this.addSettingTab(
       new NestedPropertiesPluginSettingTab({
         app: this.app,
-        onSettingsChanged: (key, value): void => {
-          nestedPropertyRendererComponent.refreshSettings(key, value);
+        onSettingsChanged: (...[key, value]): void => {
+          if (typeof value === 'boolean') {
+            nestedPropertyRendererComponent.refreshSettings(key, value);
+          }
           propertyFieldVisualsComponent.refresh();
         },
         plugin: this,

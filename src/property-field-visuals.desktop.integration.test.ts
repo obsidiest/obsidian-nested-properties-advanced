@@ -362,7 +362,7 @@ describe('property-field visuals in real Obsidian', () => {
         const isFullKeyActivated = isPopoverVisible();
         moveMouse({ x: Math.min(sourceRect.right - 24, keyContentRight + 80), y: rowY });
         await nextAnimationFrame();
-        const isFullKeyImmediatelyDeactivated = !isPopoverVisible();
+        const isFullKeyRetainedDuringTimeout = isPopoverVisible();
         const isThreadActiveOutsideKey = isThreadActive();
         await waitForPopoverToHide('Full-key breadcrumb remained active outside the property key');
         const isFullKeyDeactivated = !isPopoverVisible();
@@ -374,7 +374,7 @@ describe('property-field visuals in real Obsidian', () => {
         const isIconActivated = isPopoverVisible();
         moveMouse({ x: Math.min(sourceRect.right - 24, iconRect.right + 60), y: rowY });
         await nextAnimationFrame();
-        const isIconImmediatelyDeactivated = !isPopoverVisible();
+        const isIconRetainedDuringTimeout = isPopoverVisible();
         await waitForPopoverToHide('Icon-only breadcrumb remained active outside the property icon');
         const isIconDeactivated = !isPopoverVisible();
 
@@ -382,10 +382,10 @@ describe('property-field visuals in real Obsidian', () => {
           fullFieldActivated: isFullFieldActivated,
           fullKeyActivated: isFullKeyActivated,
           fullKeyDeactivated: isFullKeyDeactivated,
-          fullKeyImmediatelyDeactivated: isFullKeyImmediatelyDeactivated,
+          fullKeyRetainedDuringTimeout: isFullKeyRetainedDuringTimeout,
           iconActivated: isIconActivated,
           iconDeactivated: isIconDeactivated,
-          iconImmediatelyDeactivated: isIconImmediatelyDeactivated,
+          iconRetainedDuringTimeout: isIconRetainedDuringTimeout,
           threadActiveOutsideKey: isThreadActiveOutsideKey
         };
       },
@@ -397,10 +397,10 @@ describe('property-field visuals in real Obsidian', () => {
       fullFieldActivated: true,
       fullKeyActivated: true,
       fullKeyDeactivated: true,
-      fullKeyImmediatelyDeactivated: true,
+      fullKeyRetainedDuringTimeout: true,
       iconActivated: true,
       iconDeactivated: true,
-      iconImmediatelyDeactivated: true,
+      iconRetainedDuringTimeout: true,
       threadActiveOutsideKey: true
     });
   });

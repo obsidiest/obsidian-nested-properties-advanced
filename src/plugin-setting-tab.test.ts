@@ -77,9 +77,10 @@ describe('NestedPropertiesPluginSettingTab', () => {
     const items = getItems(tab);
     const controls = items.map((item) => item.control).filter((control): control is TestControl => control !== undefined);
 
-    const booleanKeys = Object.entries(new PluginSettings()).filter(([, value]) => typeof value === 'boolean').map(([key]) => key);
-    expect(definitions).toHaveLength(5);
-    expect(new Set(controls.map((control) => control.key))).toEqual(new Set(booleanKeys));
+    const settingsKeys = Object.entries(new PluginSettings()).filter(([, value]) => typeof value === 'boolean' || typeof value === 'number').map(([key]) => key);
+    expect(definitions).toHaveLength(6);
+    expect(new Set(controls.map((control) => control.key))).toEqual(new Set(settingsKeys));
+    expect(definitions.map((definition) => definition.heading)).toContain('Hover Breadcrumb Popover Timeout');
     expect(items.every((item) => item.aliases !== undefined && item.aliases.length > 0 && item.desc !== undefined && item.name !== undefined)).toBe(true);
     expect(items.map((item) => item.name)).toContain('Property Field Hover Breadcrumb Activation Scope');
     expect(items.map((item) => item.name)).toContain('Property Field Threading');
@@ -265,6 +266,36 @@ describe('NestedPropertiesPluginSettingTab', () => {
     expect(editAndSave).toHaveBeenCalledTimes(1);
     expect(onSettingsChanged).toHaveBeenCalledTimes(1);
     expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it('should persist exact decimal timeouts without rebuilding the input on each keystroke', async () => {
+    const { editAndSave, onSettingsChanged, settings, tab } = createSettingTab();
+    const update = vi.spyOn(tab, 'update').mockImplementation(() => undefined);
+    for (const value of ['1.25', NaN, Infinity, -1, 3_000_000, false]) {
+      await tab.setControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds', value);
+    }
+    expect(editAndSave).not.toHaveBeenCalled();
+    for (const value of [0, 0.35, 1.275, 12.5]) {
+      await tab.setControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds', value);
+      expect(settings.globalHoverBreadcrumbPopoverTimeoutSeconds).toBe(value);
+      expect(tab.getControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds')).toBe(value);
+    }
+    expect(onSettingsChanged).toHaveBeenLastCalledWith('globalHoverBreadcrumbPopoverTimeoutSeconds', 12.5);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('should keep individual timeout controls independent of the global toggle', () => {
+    const { settings, tab } = createSettingTab();
+    const controls = new Map(getItems(tab).map((item) => item.control).filter((control): control is DisabledTestControl => control?.disabled !== undefined).map((control) => [control.key, control]));
+    expect(settings.isGloballyControlHoverBreadcrumbTimeoutEnabled).toBe(true);
+    expect(controls.get('globalHoverBreadcrumbPopoverTimeoutSeconds')?.disabled()).toBe(false);
+    expect(controls.get('livePreviewModeHoverBreadcrumbTimeoutSeconds')?.disabled()).toBe(true);
+    settings.isControlLivePreviewModeHoverBreadcrumbTimeoutIndividuallyEnabled = true;
+    expect(controls.get('livePreviewModeHoverBreadcrumbTimeoutSeconds')?.disabled()).toBe(false);
+    settings.isGloballyControlHoverBreadcrumbTimeoutEnabled = false;
+    expect(controls.get('globalHoverBreadcrumbPopoverTimeoutSeconds')?.disabled()).toBe(true);
+    expect(controls.get('livePreviewModeHoverBreadcrumbTimeoutSeconds')?.disabled()).toBe(false);
+    expect(controls.get('isControlSourceModeHoverBreadcrumbTimeoutIndividuallyEnabled')?.disabled()).toBe(false);
   });
 
   it('should turn off only the mutually exclusive global counterpart when a state is enabled', async () => {

@@ -11,27 +11,38 @@ import {
   PluginSettingTab
 } from 'obsidian';
 
+import {
+  isValidHoverBreadcrumbTimeout,
+  MAX_HOVER_BREADCRUMB_TIMEOUT_SECONDS
+} from './hover-breadcrumb-timeout.ts';
 import { PluginSettingsComponent } from './plugin-settings-component.ts';
 import { PluginSettings } from './plugin-settings.ts';
 
 export type BooleanSettingsKey = BooleanSettingsKeyMap[keyof BooleanSettingsKeyMap];
-
+export type NumberSettingsKey = NumberSettingsKeyMap[keyof NumberSettingsKeyMap];
+export type SettingsKey = BooleanSettingsKey | NumberSettingsKey;
 type BooleanSettingsKeyMap = {
   [Key in keyof PluginSettings]: PluginSettings[Key] extends boolean ? Key : never;
 };
+type NumberSettingsKeyMap = {
+  [Key in keyof PluginSettings]: PluginSettings[Key] extends number ? Key : never;
+};
+
+type SettingsChange = [key: BooleanSettingsKey, value: boolean] | [key: NumberSettingsKey, value: number];
 
 const DEFAULT_SETTINGS = new PluginSettings();
-const SETTINGS_KEYS = new Set<string>(Object.entries(DEFAULT_SETTINGS).filter(([, value]) => typeof value === 'boolean').map(([key]) => key));
+const BOOLEAN_SETTINGS_KEYS = new Set<string>(Object.entries(DEFAULT_SETTINGS).filter(([, value]) => typeof value === 'boolean').map(([key]) => key));
+const NUMBER_SETTINGS_KEYS = new Set<string>(Object.entries(DEFAULT_SETTINGS).filter(([, value]) => typeof value === 'number').map(([key]) => key));
 
 export interface NestedPropertiesPluginSettingTabConstructorParams {
   readonly app: App;
-  onSettingsChanged(this: void, key: BooleanSettingsKey, isEnabled: boolean): void;
+  onSettingsChanged(this: void, ...change: SettingsChange): void;
   readonly plugin: Plugin;
   readonly pluginSettingsComponent: PluginSettingsComponent;
 }
 
 export class NestedPropertiesPluginSettingTab extends PluginSettingTab {
-  private readonly onSettingsChanged: (key: BooleanSettingsKey, isEnabled: boolean) => void;
+  private readonly onSettingsChanged: (...change: SettingsChange) => void;
   private readonly pluginSettingsComponent: PluginSettingsComponent;
 
   public constructor(params: NestedPropertiesPluginSettingTabConstructorParams) {
@@ -40,7 +51,7 @@ export class NestedPropertiesPluginSettingTab extends PluginSettingTab {
     this.pluginSettingsComponent = params.pluginSettingsComponent;
   }
 
-  public override getSettingDefinitions(): SettingDefinitionItem<BooleanSettingsKey>[] {
+  public override getSettingDefinitions(): SettingDefinitionItem<SettingsKey>[] {
     const settings = this.pluginSettingsComponent.settings;
     const isBreadcrumbOff = (): boolean => !settings.isPropertyFieldHoverBreadcrumbEnabled;
     const isThreadingOff = (): boolean => !settings.isPropertyFieldThreadingEnabled;
@@ -69,9 +80,19 @@ export class NestedPropertiesPluginSettingTab extends PluginSettingTab {
         this.toggle('isPropertyFieldHoverBreadcrumbInSourceModeEnabled', 'Hover Breadcrumb in Source Mode', 'Show the property-field breadcrumb while hovering raw frontmatter in Source mode.', ['raw yaml breadcrumb', 'source popover'], isBreadcrumbOff),
         this.toggle('isPropertyFieldHoverBreadcrumbInReadingModeEnabled', 'Hover Breadcrumb in Reading Mode', 'Show the property-field breadcrumb in Reading mode.', ['rendered properties breadcrumb', 'reading popover'], isBreadcrumbOff),
         this.toggle('isFullPropertyFieldNameExpansionInHoverBreadcrumbEnabled', 'Full Property Field Name Expansion in a Property Field Hover Breadcrumb', 'Wrap long property field names onto additional lines so the complete name remains visible inside the breadcrumb.', ['wrap long breadcrumb names', 'complete property names in popover', 'multiline breadcrumb fields'], isBreadcrumbOff),
-        this.subheading('Property Field Hover Breadcrumb Activation Scope', 'Choose whether the breadcrumb activates across the whole field, the whole key, or only the property icon/Source expansion control.'),
+        this.subheading('Property Field Hover Breadcrumb Activation Scope', 'Choose full-field, full-key, or icon activation. In Source mode, the fold-gutter area beside every property also activates the breadcrumb, including leaves without an expansion toggle.'),
         this.toggle('isFullWidthPropertyFieldHoverActivationEnabled', 'Full-Width Property Field Hover Activation', 'Activate the breadcrumb anywhere across the full property row, including its key and value. This scope takes priority over the key-only scope.', ['whole property row breadcrumb', 'key and value hover popover', 'full field activation'], isBreadcrumbOff),
-        this.toggle('isFullWidthPropertyKeyHoverActivationEnabled', 'Full-Width Property Key Hover Activation', 'Activate the breadcrumb anywhere across the property key, including its icon or Source-mode expansion toggle. When both scope toggles are off, only that icon or expansion toggle activates it.', ['property key hover popover', 'key width breadcrumb', 'icon fallback activation'], isBreadcrumbOff)
+        this.toggle('isFullWidthPropertyKeyHoverActivationEnabled', 'Full-Width Property Key Hover Activation', 'Activate the breadcrumb across the property key and its icon. Source-mode fold gutters activate with either scope enabled or with both off, including beside leaf properties.', ['property key hover popover', 'key width breadcrumb', 'icon fallback activation', 'leaf property gutter'], isBreadcrumbOff)
+      ]),
+      this.group('Hover Breadcrumb Popover Timeout', [
+        this.toggle('isGloballyControlHoverBreadcrumbTimeoutEnabled', 'Globally Control Hover Breadcrumb Timeout', 'Use the global timeout in every viewing mode unless that mode has its individual control enabled. With neither control enabled, the default is 1 second.', ['global breadcrumb delay', 'popover dismissal timing'], isBreadcrumbOff),
+        this.timeout('globalHoverBreadcrumbPopoverTimeoutSeconds', 'Global Hover Breadcrumb Popover Timeout', 'Seconds after leaving the active field or popover. Entering the popover cancels dismissal. Decimals are supported; 0 closes immediately.', ['global hover timeout seconds', 'breadcrumb navigation grace period'], () => isBreadcrumbOff() || !settings.isGloballyControlHoverBreadcrumbTimeoutEnabled),
+        this.toggle('isControlLivePreviewModeHoverBreadcrumbTimeoutIndividuallyEnabled', 'Control Live Preview Mode Hover Breadcrumb Timeout Individually', 'Override the global timeout for Live Preview, even while global control is enabled.', ['live preview breadcrumb timeout override'], isBreadcrumbOff),
+        this.timeout('livePreviewModeHoverBreadcrumbTimeoutSeconds', 'Live Preview Mode', 'Popover timeout in seconds for Live Preview. Decimals are supported; 0 closes immediately.', ['live preview hover timeout seconds'], () => isBreadcrumbOff() || !settings.isControlLivePreviewModeHoverBreadcrumbTimeoutIndividuallyEnabled),
+        this.toggle('isControlSourceModeHoverBreadcrumbTimeoutIndividuallyEnabled', 'Control Source Mode Hover Breadcrumb Timeout Individually', 'Override the global timeout for Source mode, even while global control is enabled.', ['source breadcrumb timeout override'], isBreadcrumbOff),
+        this.timeout('sourceModeHoverBreadcrumbTimeoutSeconds', 'Source Mode', 'Popover timeout in seconds for Source mode. Decimals are supported; 0 closes immediately.', ['source hover timeout seconds'], () => isBreadcrumbOff() || !settings.isControlSourceModeHoverBreadcrumbTimeoutIndividuallyEnabled),
+        this.toggle('isControlReadingModeHoverBreadcrumbTimeoutIndividuallyEnabled', 'Control Reading Mode Hover Breadcrumb Timeout Individually', 'Override the global timeout for Reading mode, even while global control is enabled.', ['reading breadcrumb timeout override'], isBreadcrumbOff),
+        this.timeout('readingModeHoverBreadcrumbTimeoutSeconds', 'Reading Mode', 'Popover timeout in seconds for Reading mode. Decimals are supported; 0 closes immediately.', ['reading hover timeout seconds'], () => isBreadcrumbOff() || !settings.isControlReadingModeHoverBreadcrumbTimeoutIndividuallyEnabled)
       ]),
       this.group('Static Tree Indentation Guides', [
         this.toggle('isNestedPropertiesMainUiStaticTreeIndentationGuidesEnabled', 'Main UI Static Tree Indentation Guides', 'Show continuous sibling spines and horizontal connectors in the main Properties UI.', ['property tree guides', 'main ui indentation lines', 'static property spines']),
@@ -109,14 +130,23 @@ export class NestedPropertiesPluginSettingTab extends PluginSettingTab {
   }
 
   public override getControlValue(key: string): unknown {
-    if (!SETTINGS_KEYS.has(key)) {
+    if (!BOOLEAN_SETTINGS_KEYS.has(key) && !NUMBER_SETTINGS_KEYS.has(key)) {
       return undefined;
     }
-    return this.pluginSettingsComponent.settings[key as BooleanSettingsKey];
+    return this.pluginSettingsComponent.settings[key as SettingsKey];
   }
 
   public override async setControlValue(key: string, value: unknown): Promise<void> {
-    if (!SETTINGS_KEYS.has(key) || typeof value !== 'boolean') {
+    if (NUMBER_SETTINGS_KEYS.has(key) && isValidHoverBreadcrumbTimeout(value)) {
+      const settingsKey = key as NumberSettingsKey;
+      await this.pluginSettingsComponent.editAndSave((settings) => {
+        settings[settingsKey] = value;
+      });
+      this.onSettingsChanged(settingsKey, value);
+      // Keep the native numeric input mounted while editing fractional values.
+      return;
+    }
+    if (!BOOLEAN_SETTINGS_KEYS.has(key) || typeof value !== 'boolean') {
       return;
     }
     await this.pluginSettingsComponent.editAndSave((settings) => {
@@ -130,11 +160,11 @@ export class NestedPropertiesPluginSettingTab extends PluginSettingTab {
     this.update();
   }
 
-  private group(heading: string, items: SettingGroupItem<BooleanSettingsKey>[]): SettingDefinitionItem<BooleanSettingsKey> {
+  private group(heading: string, items: SettingGroupItem<SettingsKey>[]): SettingDefinitionItem<SettingsKey> {
     return { heading, items, type: 'group' };
   }
 
-  private subheading(name: string, desc: string): SettingGroupItem<BooleanSettingsKey> {
+  private subheading(name: string, desc: string): SettingGroupItem<SettingsKey> {
     return {
       aliases: ['breadcrumb activation scope', 'hover activation width'],
       desc,
@@ -145,7 +175,16 @@ export class NestedPropertiesPluginSettingTab extends PluginSettingTab {
     };
   }
 
-  private toggle(key: BooleanSettingsKey, name: string, desc: string, aliases: string[], isDisabled?: () => boolean): SettingGroupItem<BooleanSettingsKey> {
+  private timeout(key: NumberSettingsKey, name: string, desc: string, aliases: string[], isDisabled: () => boolean): SettingGroupItem<SettingsKey> {
+    return {
+      aliases,
+      control: { defaultValue: DEFAULT_SETTINGS[key], disabled: isDisabled, key, max: MAX_HOVER_BREADCRUMB_TIMEOUT_SECONDS, min: 0, step: 'any', type: 'number' },
+      desc,
+      name
+    };
+  }
+
+  private toggle(key: BooleanSettingsKey, name: string, desc: string, aliases: string[], isDisabled?: () => boolean): SettingGroupItem<SettingsKey> {
     return {
       aliases,
       control: {

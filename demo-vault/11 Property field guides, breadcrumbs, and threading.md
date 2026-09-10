@@ -21,7 +21,7 @@ contributors:
 This note's own properties form several nested branches. Use them to try the visual hierarchy features without changing another note.
 
 1. Open **Settings → Nested Properties Advanced**. **Property Field Hover Breadcrumb** is enabled by default and can be switched off globally or by view mode.
-2. By default, hover anywhere across a property key. Enable **Full-Width Property Field Hover Activation** to include the value and the rest of the row, or disable both activation-scope switches to require the property icon in Live Preview/Reading mode or the left-side expansion toggle in Source mode.
+2. By default, hover anywhere across a property key. Enable **Full-Width Property Field Hover Activation** to include the value and the rest of the row, or disable both activation-scope switches to require the property icon in Live Preview/Reading mode or the fold-gutter area beside any Source property, including leaves without an expansion toggle.
 3. Try the selected activation scope above this note in Live Preview, then switch to Source and Reading modes. Long breadcrumb names wrap by default; disable **Full Property Field Name Expansion in a Property Field Hover Breadcrumb** to compare the compact presentation.
 4. Move through the breadcrumb with the arrow, Home, and End keys. Click a row to focus that field.
 5. Enable **Property Field Threading**. Compare active-field, all-branches, root-level, and cursor activation while moving between `project`, `contributors`, and their descendants.
@@ -29,9 +29,18 @@ This note's own properties form several nested branches. Use them to try the vis
 
 Static main-UI and breadcrumb guides and the hover breadcrumb are enabled by default. The threading master switch remains disabled by default, so threading is opt-in. **Highlight Active Property Field Tree** is also opt-in and has its own Style Settings controls.
 
+## Hover Breadcrumb Popover Timeout
+
+The fold-gutter area before every Source property activates a breadcrumb under all four combinations of the two activation-scope switches. Compare the parent `project` with the leaf `name`, including when both switches are disabled.
+
+1. In the **Hover Breadcrumb Popover Timeout** settings section, leave **Globally Control Hover Breadcrumb Timeout** enabled and set **Global Hover Breadcrumb Popover Timeout** to `2.5` seconds. Open a breadcrumb, move through the gap into it, and click an ancestor to navigate. Moving entirely away should close it after the configured delay.
+2. Enable **Control Source Mode Hover Breadcrumb Timeout Individually** and set **Source Mode** to `4` seconds. Source now uses four seconds while Live Preview and Reading retain the global value.
+3. Enable **Control Live Preview Mode Hover Breadcrumb Timeout Individually** and **Control Reading Mode Hover Breadcrumb Timeout Individually**, and enter distinct values in **Live Preview Mode** and **Reading Mode**. Each enabled individual control overrides the global setting, even when global control remains enabled.
+4. Disable global control and all three individual controls to try the built-in one-second delay. Re-enable global control to return to your saved global value. Zero means immediate dismissal; decimal seconds are supported. Reload the plugin to check that your values persist.
+
 ## Settings coverage
 
-The plugin's searchable settings page exposes every persisted switch below. Child switches are disabled until their parent switch is enabled.
+The plugin's searchable settings page exposes the switches and numeric controls below. Child controls are disabled until their parent switch is enabled.
 
 - `allNestedPropertiesExpansionStateByNote`
 - `fullKeyNamesExpansionStateByNote`
@@ -55,6 +64,14 @@ The plugin's searchable settings page exposes every persisted switch below. Chil
 - `isPropertyFieldHoverBreadcrumbInSourceModeEnabled`
 - `isPropertyFieldHoverBreadcrumbInReadingModeEnabled`
 - `isPropertyFieldHoverBreadcrumbStaticTreeIndentationGuidesEnabled`
+- `isGloballyControlHoverBreadcrumbTimeoutEnabled`
+- `globalHoverBreadcrumbPopoverTimeoutSeconds`
+- `isControlLivePreviewModeHoverBreadcrumbTimeoutIndividuallyEnabled`
+- `livePreviewModeHoverBreadcrumbTimeoutSeconds`
+- `isControlSourceModeHoverBreadcrumbTimeoutIndividuallyEnabled`
+- `sourceModeHoverBreadcrumbTimeoutSeconds`
+- `isControlReadingModeHoverBreadcrumbTimeoutIndividuallyEnabled`
+- `readingModeHoverBreadcrumbTimeoutSeconds`
 - `isNestedPropertiesMainUiStaticTreeIndentationGuidesEnabled`
 - `isNestedPropertiesMainUiStaticTreeIndentationGuidesInLivePreviewEnabled`
 - `isNestedPropertiesMainUiStaticTreeIndentationGuidesInSourceModeEnabled`

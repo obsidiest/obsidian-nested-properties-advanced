@@ -138,6 +138,11 @@ beforeEach(async () => {
       await tab.setControlValue('isPropertyFieldThreadingInMainUiEnabled', true);
       await tab.setControlValue('isPropertyFieldHoverBreadcrumbEnabled', true);
       await tab.setControlValue('isFullWidthPropertyFieldHoverActivationEnabled', true);
+      await tab.setControlValue('isGloballyControlHoverBreadcrumbTimeoutEnabled', true);
+      await tab.setControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds', 0.12);
+      for (const mode of ['LivePreview', 'Source', 'Reading']) {
+        await tab.setControlValue(`isControl${mode}ModeHoverBreadcrumbTimeoutIndividuallyEnabled`, false);
+      }
       // Park the native pointer outside the note before the next traversal. A breadcrumb
       // From its previous position can otherwise cover the input about to be clicked.
       await hoverElement({ element: leaf.tabHeaderEl });
@@ -163,6 +168,189 @@ afterEach(async () => {
 });
 
 describe('Property interaction surfaces with Minimal and hidden titles', () => {
+  it.each([false, true])('activates parent and leaf Source gutters in every scope with popout=%s', async (isPopout) => {
+    const result = await evalInObsidian({
+      callback: async ({ app, context: { markdownView, nativeInput: { moveMouse }, settingsTab }, lib: { waitUntil }, popoutMode }) => {
+        await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: 'source', source: true }, type: 'markdown' });
+        if (popoutMode) {
+          const popout = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
+          popout.win.electronWindow.focus();
+          await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === popout.doc && popout.doc.hasFocus() });
+        }
+        const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
+        if (source === null) {
+          throw new Error('Source editor missing');
+        }
+        const doc = source.ownerDocument;
+        const failures: object[] = [];
+        for (const [field, keyScope] of [[false, false], [false, true], [true, false], [true, true]]) {
+          await settingsTab.setControlValue('isFullWidthPropertyFieldHoverActivationEnabled', field);
+          await settingsTab.setControlValue('isFullWidthPropertyKeyHoverActivationEnabled', keyScope);
+          for (const key of ['root', 'flat.object', 'emptyScalar', 'emptyList', 'inlineObject', 'nested', 'child', 'leaf']) {
+            const row = [...source.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${key}:`));
+            if (row === undefined) {
+              throw new Error(`Source row missing: ${key}`);
+            }
+            const walker = doc.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+            let first: DOMRect | undefined;
+            for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+              const start = node.textContent?.search(/\S/u) ?? -1;
+              if (start < 0) {
+                continue;
+              }
+              const range = doc.createRange();
+              range.setStart(node, start);
+              range.setEnd(node, start + 1);
+              first = range.getBoundingClientRect();
+              break;
+            }
+            if (first === undefined) {
+              throw new Error(`Source key geometry missing: ${key}`);
+            }
+            const point = { x: first.left - first.height / 2, y: (first.top + first.bottom) / 2 };
+            moveMouse(point);
+            await new Promise<void>((resolve) => {
+              doc.win.setTimeout(resolve, 200);
+            });
+            const current = doc.querySelector(':scope .np-property-breadcrumb-popover .is-current button')?.textContent;
+            if (current !== key) {
+              failures.push({ current: current ?? null, field, key, keyScope, point, target: doc.elementFromPoint(point.x, point.y)?.className });
+            }
+            const surface = source.getBoundingClientRect();
+            moveMouse({ x: surface.right - 4, y: surface.top + 2 });
+            await waitUntil({ predicate: () => doc.querySelector('.np-property-breadcrumb-popover') === null });
+          }
+        }
+        return failures;
+      },
+      contextId,
+      input: { popoutMode: isPopout },
+      vaultPath: vault.path
+    });
+    expect(result).toEqual([]);
+  });
+
+  it.each(['live-preview', 'source', 'reading'].flatMap((mode) => [false, true].map((popout) => ({ mode, popout }))))('preserves navigation across a slow pointer crossing in $mode with popout=$popout', async ({ mode, popout }) => {
+    const result = await evalInObsidian({
+      callback: async ({ app, context: { markdownView, nativeInput: { clickElement, moveMouse }, settingsTab }, lib: { waitUntil }, popoutMode, viewMode }) => {
+        await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: viewMode === 'reading' ? 'preview' : 'source', source: viewMode === 'source' }, type: 'markdown' });
+        if (popoutMode) {
+          const movedWindow = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
+          movedWindow.win.electronWindow.focus();
+          await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === movedWindow.doc && movedWindow.doc.hasFocus() });
+        }
+        const modeKey = viewMode === 'live-preview' ? 'LivePreview' : (viewMode === 'source' ? 'Source' : 'Reading');
+        const valueKey = viewMode === 'live-preview' ? 'livePreview' : viewMode;
+        await settingsTab.setControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds', 0.01);
+        await settingsTab.setControlValue(`isControl${modeKey}ModeHoverBreadcrumbTimeoutIndividuallyEnabled`, true);
+        await settingsTab.setControlValue(`${valueKey}ModeHoverBreadcrumbTimeoutSeconds`, 0.6);
+        const doc = markdownView.containerEl.ownerDocument;
+        function pause(ms: number): Promise<void> {
+          return new Promise((resolve) => {
+            doc.win.setTimeout(resolve, ms);
+          });
+        }
+        function property(key: string): HTMLElement | undefined {
+          return viewMode === 'source'
+            ? [...markdownView.containerEl.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${key}:`))
+            : [...markdownView.containerEl.querySelectorAll<HTMLElement>('.metadata-property-key')].find((element) => (element.querySelector<HTMLInputElement>('.metadata-property-key-input')?.value ?? element.textContent.trim()) === key);
+        }
+        await waitUntil({ predicate: () => property('leaf') !== undefined });
+        const leaf = property('leaf');
+        if (leaf === undefined) {
+          throw new Error('Leaf field missing');
+        }
+        const anchor = leaf.getBoundingClientRect();
+        const enter = { x: anchor.left + 8, y: (anchor.top + anchor.bottom) / 2 };
+        const outside = { x: doc.win.innerWidth - 5, y: 30 };
+        moveMouse(enter);
+        await waitUntil({ predicate: () => doc.querySelector(':scope .np-property-breadcrumb-popover .is-current button')?.textContent === 'leaf' });
+        const panel = doc.querySelector<HTMLElement>('.np-property-breadcrumb-popover');
+        if (panel === null) {
+          throw new Error('Breadcrumb missing');
+        }
+        const rect = panel.getBoundingClientRect();
+        moveMouse({ x: Math.max(anchor.left, rect.left) + 8, y: (rect.top >= anchor.bottom ? anchor.bottom + rect.top : rect.bottom + anchor.top) / 2 });
+        await pause(250);
+        const isSameAfterGap = panel.isConnected && doc.querySelector('.np-property-breadcrumb-popover') === panel;
+        const ancestor = [...panel.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'nested');
+        if (ancestor === undefined) {
+          throw new Error('Ancestor navigation button missing');
+        }
+        const button = ancestor.getBoundingClientRect();
+        moveMouse({ x: button.left + 12, y: (button.top + button.bottom) / 2 });
+        await pause(700);
+        const isStaysInside = panel.isConnected;
+        moveMouse(outside);
+        await pause(250);
+        const isIndividualOverride = panel.isConnected;
+        await waitUntil({ predicate: () => !panel.isConnected });
+        moveMouse(enter);
+        await waitUntil({ predicate: () => doc.querySelector(':scope .np-property-breadcrumb-popover .is-current button')?.textContent === 'leaf' });
+        const navigation = [...doc.querySelectorAll<HTMLButtonElement>(':scope .np-property-breadcrumb-popover button')].find((candidate) => candidate.textContent === 'nested');
+        if (navigation === undefined) {
+          throw new Error('Reopened navigation missing');
+        }
+        clickElement({ element: navigation });
+        await pause(250);
+        const isNavigated = viewMode === 'source'
+          ? markdownView.editor.getLine(markdownView.editor.getCursor().line).trim() === 'nested:'
+          : property('nested')?.contains(doc.activeElement) === true;
+        return { individualOverride: isIndividualOverride, navigated: isNavigated, sameAfterGap: isSameAfterGap, staysInside: isStaysInside };
+      },
+      contextId,
+      input: { popoutMode: popout, viewMode: mode },
+      vaultPath: vault.path
+    });
+    expect(result).toEqual({ individualOverride: true, navigated: true, sameAfterGap: true, staysInside: true });
+  });
+
+  it('keeps decimal timeout input mounted through typing, Enter, and plugin reload', async () => {
+    const result = await evalInObsidian({
+      callback: async ({ app, context: { nativeInput: { clickElement, pressKey }, settingsTab }, lib: { waitUntil } }) => {
+        app.setting.open();
+        app.setting.openTabById('nested-properties-advanced');
+        function findInput(tab: PluginSettingTab): HTMLInputElement | null {
+          return [...tab.containerEl.querySelectorAll('.setting-item')].find((row) => row.querySelector('.setting-item-name')?.textContent === 'Global Hover Breadcrumb Popover Timeout')?.querySelector('input') ?? null;
+        }
+        try {
+          await waitUntil({ predicate: () => findInput(settingsTab) !== null });
+          const input = findInput(settingsTab);
+          if (input === null) {
+            throw new Error('Timeout number control missing');
+          }
+          input.scrollIntoView({ block: 'center' });
+          clickElement({ element: input });
+          pressKey({ key: 'a', modifiers: ['Ctrl'] });
+          for (const key of '2.75') {
+            pressKey({ key });
+            await new Promise<void>((resolve) => {
+              input.win.setTimeout(resolve, 40);
+            });
+          }
+          pressKey({ key: 'Enter' });
+          await waitUntil({ predicate: () => settingsTab.getControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds') === 2.75 });
+          const value = input.value;
+          const isSameInput = findInput(settingsTab) === input && input.isConnected;
+          const type = input.type;
+          app.setting.close();
+          await app.plugins.disablePlugin('nested-properties-advanced');
+          await app.plugins.enablePlugin('nested-properties-advanced');
+          const reloaded = app.setting.pluginTabs.find((tab) => tab.id === 'nested-properties-advanced');
+          if (reloaded === undefined) {
+            throw new Error('Reloaded settings missing');
+          }
+          return { persisted: reloaded.getControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds'), sameInput: isSameInput, type, value };
+        } finally {
+          app.setting.close();
+        }
+      },
+      contextId,
+      vaultPath: vault.path
+    });
+    expect(result).toEqual({ persisted: 2.75, sameInput: true, type: 'number', value: '2.75' });
+  });
+
   it.each([false, true].flatMap((isSource) => ['main', 'popout', 'reload', 'popout-reload'].map((lifecycle) => ({ isSource, lifecycle }))))('sweeps root, flattened and nested rows with Source=$isSource after $lifecycle', async ({ isSource, lifecycle }) => {
     const result = await evalInObsidian({
       // eslint-disable-next-line complexity -- The serialized desktop callback compares all regions in one pointer traversal.
