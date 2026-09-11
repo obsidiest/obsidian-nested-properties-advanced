@@ -32,6 +32,22 @@ export function findSourceMappingColon(text: string, start = 0): number {
   return -1;
 }
 
+/**
+End of editable key text, before separator whitespace or a closing quote.
+*/
+export function getSourcePropertyKeyEnd(text: string, start: number): number {
+  if (text[start] === '-' && (start + 1 === text.length || /\s/u.test(text[start + 1] ?? ''))) {
+    return start + 1;
+  }
+  const quote = text[start];
+  if (quote === '"' || quote === '\'') {
+    const end = findQuotedKeyEnd(text, start, quote);
+    return end === -1 ? start : end - 1;
+  }
+  const colon = findSourceMappingColon(text, start);
+  return colon === -1 ? Math.min(start, text.length) : text.slice(0, colon).trimEnd().length;
+}
+
 function findQuotedKeyEnd(text: string, start: number, quote: string): number {
   for (let index = start + 1; index < text.length; index++) {
     const character = text[index];

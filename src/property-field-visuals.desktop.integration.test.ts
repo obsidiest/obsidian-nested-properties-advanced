@@ -223,6 +223,20 @@ describe('property-field visuals in real Obsidian', () => {
                 ? ownerDocument.activeElement?.closest('.metadata-property-value') !== null && ownerDocument.activeElement !== input
                 : !ownerDocument.activeElement?.matches('input, textarea, [contenteditable="true"]')
           });
+          // Native value suggestions resolve asynchronously after focus. Their
+          // Keyboard scope consumes Escape to close the menu before the control
+          // Receives its own Escape. Let that focus turn finish, then dismiss
+          // Any rendered value menu explicitly before testing field exit/history.
+          await new Promise<void>((resolve) => {
+            ownerDocument.win.requestAnimationFrame(() => {
+              resolve();
+            });
+          });
+          const valueSuggestions = ownerDocument.querySelector<HTMLElement>('.suggestion-container.mod-property-value');
+          if (valueSuggestions?.isShown()) {
+            pressKey({ key: 'Escape' });
+            await waitUntil({ message: 'Escape did not dismiss native value suggestions', predicate: () => !valueSuggestions.isConnected });
+          }
           pressKey({ key: 'Escape' });
         } else {
           // The title itself is contenteditable. Use the header's outer padding so focus

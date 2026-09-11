@@ -8,23 +8,23 @@ import { getHoverBreadcrumbTimeoutMilliseconds } from './hover-breadcrumb-timeou
 import { PluginSettings } from './plugin-settings.ts';
 
 describe('hover breadcrumb timeout precedence', () => {
-  it('should default all four numerical settings to 0.02 seconds', () => {
+  it('should default all four numerical settings to 0.01 seconds', () => {
     const settings = new PluginSettings();
     expect([
       settings.globalHoverBreadcrumbPopoverTimeoutSeconds,
       settings.livePreviewModeHoverBreadcrumbTimeoutSeconds,
       settings.sourceModeHoverBreadcrumbTimeoutSeconds,
       settings.readingModeHoverBreadcrumbTimeoutSeconds
-    ]).toEqual([0.02, 0.02, 0.02, 0.02]);
+    ]).toEqual([0.01, 0.01, 0.01, 0.01]);
   });
 
   it.each(['live-preview', 'source', 'reading'] as const)('should use the global value or default in %s', (mode) => {
     const settings = new PluginSettings();
-    expect(getHoverBreadcrumbTimeoutMilliseconds(settings, mode)).toBe(20);
+    expect(getHoverBreadcrumbTimeoutMilliseconds(settings, mode)).toBe(10);
     settings.globalHoverBreadcrumbPopoverTimeoutSeconds = 1.275;
     expect(getHoverBreadcrumbTimeoutMilliseconds(settings, mode)).toBe(1275);
     settings.isGloballyControlHoverBreadcrumbTimeoutEnabled = false;
-    expect(getHoverBreadcrumbTimeoutMilliseconds(settings, mode)).toBe(20);
+    expect(getHoverBreadcrumbTimeoutMilliseconds(settings, mode)).toBe(10);
   });
 
   it.each([true, false])('should apply independent mode overrides when global control is %s', (global) => {
@@ -46,7 +46,7 @@ describe('hover breadcrumb timeout precedence', () => {
     const settings = new PluginSettings();
     for (const value of [NaN, Infinity, -1, 3_000_000]) {
       settings.globalHoverBreadcrumbPopoverTimeoutSeconds = value;
-      expect(getHoverBreadcrumbTimeoutMilliseconds(settings, 'source')).toBe(20);
+      expect(getHoverBreadcrumbTimeoutMilliseconds(settings, 'source')).toBe(10);
     }
   });
 });

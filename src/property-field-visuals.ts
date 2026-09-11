@@ -39,7 +39,9 @@ import {
   sourceFieldHighlightEffect,
   sourceFieldHighlightState
 } from './source-field-highlight.ts';
-import { findSourceMappingColon } from './source-property-key.ts';
+import {
+ findSourceMappingColon, getSourcePropertyKeyEnd
+} from './source-property-key.ts';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const OWNED_VISUAL_SELECTOR = '.np-property-tree-overlay, .np-property-source-overlay, .np-property-breadcrumb-popover';
@@ -1366,7 +1368,7 @@ export class PropertyFieldVisualsComponent extends Component {
       ? flattenPropertyFieldForest([root])
       : getPropertyFieldAncestors(current);
     this.showBreadcrumb(ownerDocument, createBreadcrumbEntries(nodes, current), anchor, (node) => {
-      view.editor.setCursor({ ch: view.editor.getLine(node.line).length, line: node.line });
+      view.editor.setCursor({ ch: getSourcePropertyKeyEnd(view.editor.getLine(node.line), node.column), line: node.line });
       view.editor.focus();
     }, (node) => {
       if (!settings.isActiveCursorPropertyFieldThreadingEnabled && this.isMainThreadingEnabled('source')) {

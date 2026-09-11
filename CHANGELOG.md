@@ -4,8 +4,8 @@
 
 - fix: share Source mapping-key boundaries so apostrophes in plain property names retain guides, threading, and hover activation
 - fix: measure expanded parent key hover regions independently of child containers positioned below them
-- feat: single-click breadcrumb navigation places the caret at the Live Preview key end or Source property line end, with hover previews independent of keyboard focus
-- feat: use descriptive per-mode hover breadcrumb timeout labels and default all four numerical values to 0.02 seconds while preserving saved values
+- feat: single-click breadcrumb navigation places the caret at the key end in Live Preview and Source, with hover previews independent of keyboard focus
+- feat: use descriptive per-mode hover breadcrumb timeout labels and default all four numerical values to 0.01 seconds while preserving saved values
 
 - feat: add searchable global and per-mode hover breadcrumb timeout controls with precise decimal-second inputs and individual override precedence
 - fix: activate Source-mode leaf and parent fold gutters independently of full-field and full-key activation toggles

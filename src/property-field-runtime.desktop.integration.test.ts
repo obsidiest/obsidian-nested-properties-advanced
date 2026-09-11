@@ -52,6 +52,7 @@ interface SettingsWindowConfig {
 const contextId = new ContextId<RuntimeContext>();
 const FIXTURE = `---
 root: original
+"quoted: key": value
 flat.object: flattened
 emptyScalar:
 emptyList: []
@@ -273,7 +274,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           nativePopout.win.electronWindow.focus();
           await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === nativePopout.doc && nativePopout.doc.hasFocus() });
         }
-        await settingsTab.setControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds', 0.02);
+        await settingsTab.setControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds', 0.01);
         const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
         if (source === null) {
           throw new Error('Navigation surface missing');
@@ -285,13 +286,16 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
             doc.win.setTimeout(resolve, 100);
           });
         }
-        for (const key of ['root', 'nested', 'child', 'leaf']) {
-          const triggerKey = key === 'root' ? 'root' : 'leaf';
+        const keys = isSource ? ['root', 'nested', 'child', 'leaf', 'quoted: key'] : ['root', 'nested', 'child', 'leaf'];
+        for (const key of keys) {
+          const sourceKey = key === 'quoted: key' ? '"quoted: key"' : key;
+          const triggerKey = key === 'root' || key === 'quoted: key' ? key : 'leaf';
+          const sourceTriggerKey = triggerKey === 'quoted: key' ? '"quoted: key"' : triggerKey;
           const row = isSource
-            ? [...source.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${key}:`))
+            ? [...source.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${sourceKey}:`))
             : [...source.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((input) => input.value === key);
           const trigger = isSource
-            ? [...source.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${triggerKey}:`))
+            ? [...source.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${sourceTriggerKey}:`))
             : [...source.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((input) => input.value === triggerKey);
           if (row === undefined || trigger === undefined) {
             throw new Error(`Navigation row missing: ${key}`);
@@ -306,8 +310,9 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           if (button === undefined) {
             throw new Error('Navigation button missing');
           }
-          const lineNumber = markdownView.editor.getValue().split('\n').findIndex((line) => line.trimStart().startsWith(`${key}:`));
+          const lineNumber = markdownView.editor.getValue().split('\n').findIndex((line) => line.trimStart().startsWith(`${sourceKey}:`));
           const originalLine = markdownView.editor.getLine(lineNumber);
+          const keyEnd = originalLine.indexOf(sourceKey) + sourceKey.length - (key === 'quoted: key' ? 1 : 0);
           clickElement({ element: button });
           await pause();
           // A second hover must preview another ancestor without reclaiming focus.
@@ -327,7 +332,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           const cursor = markdownView.editor.getCursor();
           const isFocused = isSource ? markdownView.editor.hasFocus() : doc.activeElement === input;
           const isAtEnd = isSource
-            ? cursor.line === lineNumber && cursor.ch === originalLine.length
+            ? cursor.line === lineNumber && cursor.ch === keyEnd
             : input?.selectionStart === key.length && input.selectionEnd === key.length;
           if (!isFocused || !isAtEnd) {
             failures.push({ active: doc.activeElement?.outerHTML.slice(0, 300), atEnd: isAtEnd, cursor, focused: isFocused, key });
@@ -335,9 +340,9 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           }
           pressKey({ key: 'x' });
           await pause();
-          const isTyped = isSource ? markdownView.editor.getLine(lineNumber) === `${originalLine}x` : input?.value === `${key}x`;
+          const isTyped = isSource ? markdownView.editor.getLine(lineNumber) === `${originalLine.slice(0, keyEnd)}x${originalLine.slice(keyEnd)}` : input?.value === `${key}x`;
           if (!isTyped) {
-            failures.push({ key, reason: 'Typing after timeout did not append at the selected field end' });
+            failures.push({ key, reason: 'Typing after timeout did not append to the selected key with the value unchanged' });
           }
           pressKey({ key: 'Backspace' });
           await pause();

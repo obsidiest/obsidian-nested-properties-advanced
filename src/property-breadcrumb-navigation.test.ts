@@ -37,7 +37,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
   const settings = new PluginSettings();
-  settings.globalHoverBreadcrumbPopoverTimeoutSeconds = 0.02;
+  settings.globalHoverBreadcrumbPopoverTimeoutSeconds = 0.01;
   component = castTo<NavigationComponent>(new PropertyFieldVisualsComponent(castTo<ConstructorParameters<typeof PropertyFieldVisualsComponent>[0]>({
     app: { workspace: { iterateAllLeaves: vi.fn(), layoutReady: false } },
     pluginSettingsComponent: { settings }
@@ -82,13 +82,13 @@ describe('breadcrumb navigation owns the editor caret independently of hover and
     buttons.find((button) => button.textContent !== name)?.dispatchEvent(new MouseEvent('mouseenter'));
     expect(document.activeElement).toBe(input);
     component.schedulePopoverHide(document);
-    vi.advanceTimersByTime(21);
+    vi.advanceTimersByTime(11);
     expect(document.querySelector('.np-property-breadcrumb-popover')).toBeNull();
     expect(document.activeElement).toBe(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([name.length, name.length]);
   });
 
-  it.each(['root', 'child'])('should single-click to the Source %s line end and retain focus after other breadcrumb hovers and timeout', (name) => {
+  it.each(['root', 'child'])('should single-click to the Source %s key end and retain focus after other breadcrumb hovers and timeout', (name) => {
     const text = '---\nroot:\n  child: value\n---';
     const source = document.body.createDiv({ cls: 'markdown-source-view' });
     const content = source.createDiv({ attr: { tabindex: '0' }, cls: 'cm-content' });
@@ -111,12 +111,12 @@ describe('breadcrumb navigation owns the editor caret independently of hover and
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('.np-property-breadcrumb-key')];
     buttons.find((button) => button.textContent === name)?.click();
     const lineNumber = name === 'root' ? 1 : 2;
-    expect(setCursor).toHaveBeenLastCalledWith({ ch: text.split('\n')[lineNumber]?.length, line: lineNumber });
+    expect(setCursor).toHaveBeenLastCalledWith({ ch: name === 'root' ? 4 : 7, line: lineNumber });
     expect(document.activeElement).toBe(content);
     buttons.find((button) => button.textContent !== name)?.dispatchEvent(new MouseEvent('mouseenter'));
     expect(document.activeElement).toBe(content);
     component.schedulePopoverHide(document);
-    vi.advanceTimersByTime(21);
+    vi.advanceTimersByTime(11);
     expect(document.querySelector('.np-property-breadcrumb-popover')).toBeNull();
     expect(document.activeElement).toBe(content);
     expect(setCursor).toHaveBeenCalledTimes(1);

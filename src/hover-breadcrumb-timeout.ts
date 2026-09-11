@@ -1,6 +1,6 @@
 import type { PluginSettings } from './plugin-settings.ts';
 
-export const DEFAULT_HOVER_BREADCRUMB_TIMEOUT_SECONDS = 0.02;
+export const DEFAULT_HOVER_BREADCRUMB_TIMEOUT_SECONDS = 0.01;
 // Browsers schedule larger delays as an immediate timer after integer overflow.
 export const MAX_HOVER_BREADCRUMB_TIMEOUT_SECONDS = 2_147_483.647;
 const MILLISECONDS_PER_SECOND = 1000;
