@@ -30,7 +30,9 @@ The first desktop candidate, `a198844`, passed 76/84 Linux and 77/84 Windows cas
 
 The failures exposed test defects: the connector assertion expected the first glyph's vertical center even for wrapped property lines; Source key sweeps accidentally used zero-width hidden Live Preview input rectangles; and Live Preview navigation timed out at a trigger/exit precondition before reaching the caret assertion. The follow-up checks connector endpoints within the corresponding rendered property line, confines input rectangles to Live Preview, exits to the tab header, closes native key suggestions only after each completed typing case, and labels precondition timeouts. The shared lexer was also split into plain/quoted scanning steps during lint review, without changing its behavior.
 
-Follow-up desktop validation is pending. Local scratch has no desktop display/Xvfb. Passing desktop automation will cover its pinned Obsidian/Minimal fixture, not acceptance in the user's actual Windows vault.
+The follow-up code candidate, `db2b63e`, passed compile/test/build and 84/84 Windows desktop cases in [run 34554318196](https://github.com/obsidiest/obsidian-nested-properties-advanced/actions/runs/34554318196). Linux initially passed 83/84: every new activation and post-timeout typing case passed, but an existing root-key history case failed its focus-exit precondition before undo/redo. Its captured trace showed Enter handing focus to the native value control, without recording Escape reaching that control. A single rerun of only the failed Linux job, with the code and assertions unchanged, passed 84/84, including all eight native history cases. The intermittent precondition failure remains part of the validation record; the passing rerun does not establish its precise native event-delivery cause.
+
+These results validate the code and tests at `db2b63e`. The final report update changes only this document. Desktop automation used Obsidian 1.13.7 and pinned Minimal 8.2.2 on Windows and Linux; local scratch has no desktop display/Xvfb. These fixture results do not constitute acceptance in the user's actual Windows vault.
 
 ## Manual acceptance still needed
 
