@@ -173,7 +173,8 @@ afterEach(async () => {
 
 describe('Property interaction surfaces with Minimal and hidden titles', () => {
   it.each([false, true])('renders guides, threads and every Source breadcrumb scope for both reported sibling names with popout=%s', async (isPopout) => {
-    const failures = await evalInObsidian({
+    const result = await evalInObsidian({
+      // eslint-disable-next-line complexity -- Keep native pointer movement and its geometry evidence in the serialized Obsidian callback.
       callback: async ({ app, context: { markdownView, nativeInput: { moveMouse }, settingsTab }, lib: { waitUntil }, popoutMode }) => {
         await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: 'source', source: true }, type: 'markdown' });
         if (popoutMode) {
@@ -190,12 +191,13 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           throw new Error('Source editor missing');
         }
         const doc = source.ownerDocument;
-        const keys = ["Chronological Release Amongst All of the Given Creator's Works", 'Chronological Release Number Amongst This Type for the Given Creator'];
+        const editorSurface = source;
+        const keys = ['Chronological Release Amongst All of the Given Creator\'s Works', 'Chronological Release Number Amongst This Type for the Given Creator'];
         const failures: object[] = [];
-        for (const reversed of [false, true]) {
-          const ordered = reversed ? [...keys].reverse() : keys;
+        for (const isReversed of [false, true]) {
+          const ordered = isReversed ? [...keys].reverse() : keys;
           markdownView.editor.setValue(`---\ncreator:\n  releases:\n${ordered.map((key) => `    ${key}: ""`).join('\n')}\n---\nBody`);
-          await waitUntil({ predicate: () => [...source.querySelectorAll('.cm-line')].some((line) => line.textContent.trimStart().startsWith(`${ordered[0]}:`)) });
+          await waitUntil({ predicate: () => [...source.querySelectorAll('.cm-line')].some((line) => line.textContent.trimStart().startsWith(`${ordered[0] ?? ''}:`)) });
           for (const scope of ['field', 'key', 'gutter']) {
             await settingsTab.setControlValue('isFullWidthPropertyFieldHoverActivationEnabled', scope === 'field');
             await settingsTab.setControlValue('isFullWidthPropertyKeyHoverActivationEnabled', scope === 'key');
@@ -221,24 +223,30 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
               }
               const surface = source.getBoundingClientRect();
               const y = (first.top + first.bottom) / 2;
-              const x = scope === 'field' ? surface.right - 24 : scope === 'key' ? first.left + first.width * 2 : first.left - first.height / 2;
+              const x = scope === 'field' ? surface.right - 24 : (scope === 'key' ? first.left + first.width * 2 : first.left - first.height / 2);
               moveMouse({ x, y });
-              await new Promise<void>((resolve) => doc.win.setTimeout(resolve, 180));
+              await new Promise<void>((resolve) => {
+                doc.win.setTimeout(resolve, 180);
+              });
+              const rowRect = row.getBoundingClientRect();
               function hasConnector(selector: string): boolean {
-                return [...source!.querySelectorAll<SVGPathElement>(selector)].some((path) => {
+                return [...editorSurface.querySelectorAll<SVGPathElement>(selector)].some((path) => {
                   const endpoint = path.getPointAtLength(path.getTotalLength());
                   const svgTop = path.ownerSVGElement?.getBoundingClientRect().top ?? 0;
+                  const endpointY = svgTop + endpoint.y;
                   const style = doc.win.getComputedStyle(path);
-                  return Math.abs(svgTop + endpoint.y - y) < 4 && path.getTotalLength() > 0
+                  // A wrapped field spans multiple visual lines. Its connector
+                  // Must end within this field, not necessarily at the first glyph.
+                  return endpointY > rowRect.top && endpointY < rowRect.bottom && path.getTotalLength() > 0
                     && style.visibility === 'visible' && style.stroke !== 'none' && Number.parseFloat(style.strokeWidth) > 0;
                 });
               }
-              const breadcrumb = doc.querySelector('.np-property-breadcrumb-popover .is-current button')?.textContent;
-              const guides = hasConnector('.np-property-source-overlay .np-property-guide-static');
-              const threads = hasConnector('.np-property-source-overlay .np-property-thread-active');
+              const breadcrumb = doc.querySelector(':scope .np-property-breadcrumb-popover .is-current button')?.textContent;
+              const isGuides = hasConnector('.np-property-source-overlay .np-property-guide-static');
+              const isThreads = hasConnector('.np-property-source-overlay .np-property-thread-active');
               const highlight = source.querySelector('.np-property-field-source-highlight')?.textContent.trimStart().startsWith(`${key}:`);
-              if (breadcrumb !== key || !guides || !threads || !highlight) {
-                failures.push({ breadcrumb, guides, highlight, key, reversed, scope, threads });
+              if (breadcrumb !== key || !isGuides || !isThreads || !highlight) {
+                failures.push({ breadcrumb, guides: isGuides, highlight, key, reversed: isReversed, scope, threads: isThreads });
               }
               moveMouse({ x: surface.right - 4, y: surface.top + 2 });
               await waitUntil({ predicate: () => doc.querySelector('.np-property-breadcrumb-popover') === null });
@@ -251,18 +259,19 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
       input: { popoutMode: isPopout },
       vaultPath: vault.path
     });
-    expect(failures).toEqual([]);
+    expect(result).toEqual([]);
   });
 
   it.each(['live-preview', 'source'].flatMap((mode) => [false, true].map((popout) => ({ mode, popout }))))('retains the end caret and accepts typing after one breadcrumb click and timeout in $mode with popout=$popout', async ({ mode, popout }) => {
-    const failures = await evalInObsidian({
+    const result = await evalInObsidian({
+      // eslint-disable-next-line complexity -- Keep the single native click, post-dismissal focus, and actual typing assertions together.
       callback: async ({ app, context: { markdownView, nativeInput: { clickElement, moveMouse, pressKey }, settingsTab }, lib: { waitUntil }, popoutMode, viewMode }) => {
         const isSource = viewMode === 'source';
         await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: 'source', source: isSource }, type: 'markdown' });
         if (popoutMode) {
-          const popout = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
-          popout.win.electronWindow.focus();
-          await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === popout.doc && popout.doc.hasFocus() });
+          const nativePopout = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
+          nativePopout.win.electronWindow.focus();
+          await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === nativePopout.doc && nativePopout.doc.hasFocus() });
         }
         await settingsTab.setControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds', 0.02);
         const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
@@ -272,7 +281,9 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         const doc = source.ownerDocument;
         const failures: object[] = [];
         function pause(): Promise<void> {
-          return new Promise((resolve) => doc.win.setTimeout(resolve, 100));
+          return new Promise((resolve) => {
+            doc.win.setTimeout(resolve, 100);
+          });
         }
         for (const key of ['root', 'nested', 'child', 'leaf']) {
           const triggerKey = key === 'root' ? 'root' : 'leaf';
@@ -287,7 +298,10 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
           }
           const rect = trigger.getBoundingClientRect();
           moveMouse({ x: rect.left + 5, y: (rect.top + rect.bottom) / 2 });
-          await waitUntil({ predicate: () => doc.querySelector('.np-property-breadcrumb-popover .is-current button')?.textContent === triggerKey });
+          await waitUntil({
+            message: `Breadcrumb trigger missing before click to ${key}; target=${doc.elementFromPoint(rect.left + 5, (rect.top + rect.bottom) / 2)?.className ?? ''}`,
+            predicate: () => doc.querySelector(':scope .np-property-breadcrumb-popover .is-current button')?.textContent === triggerKey
+          });
           const button = [...doc.querySelectorAll<HTMLButtonElement>('.np-property-breadcrumb-key')].find((entry) => entry.textContent === key);
           if (button === undefined) {
             throw new Error('Navigation button missing');
@@ -303,27 +317,36 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
             moveMouse({ x: (otherRect.left + otherRect.right) / 2, y: (otherRect.top + otherRect.bottom) / 2 });
             await pause();
           }
-          const surface = source.getBoundingClientRect();
-          moveMouse({ x: surface.right - 4, y: surface.top + 2 });
-          await waitUntil({ predicate: () => doc.querySelector('.np-property-breadcrumb-popover') === null });
+          // Exit the editor itself. After navigation scrolls it, the previous
+          // Top-of-editor parking point can be inside a different property row.
+          const outside = markdownView.leaf.tabHeaderEl.getBoundingClientRect();
+          moveMouse({ x: (outside.left + outside.right) / 2, y: (outside.top + outside.bottom) / 2 });
+          await waitUntil({ message: `Breadcrumb did not close after leaving the editor following click to ${key}`, predicate: () => doc.querySelector('.np-property-breadcrumb-popover') === null });
           await pause();
           const input = isSource ? null : row as HTMLInputElement;
           const cursor = markdownView.editor.getCursor();
-          const focused = isSource ? markdownView.editor.hasFocus() : doc.activeElement === input;
-          const atEnd = isSource ? cursor.line === lineNumber && cursor.ch === originalLine.length
+          const isFocused = isSource ? markdownView.editor.hasFocus() : doc.activeElement === input;
+          const isAtEnd = isSource
+            ? cursor.line === lineNumber && cursor.ch === originalLine.length
             : input?.selectionStart === key.length && input.selectionEnd === key.length;
-          if (!focused || !atEnd) {
-            failures.push({ active: doc.activeElement?.outerHTML.slice(0, 300), atEnd, cursor, focused, key });
+          if (!isFocused || !isAtEnd) {
+            failures.push({ active: doc.activeElement?.outerHTML.slice(0, 300), atEnd: isAtEnd, cursor, focused: isFocused, key });
             continue;
           }
           pressKey({ key: 'x' });
           await pause();
-          const typed = isSource ? markdownView.editor.getLine(lineNumber) === `${originalLine}x` : input?.value === `${key}x`;
-          if (!typed) {
+          const isTyped = isSource ? markdownView.editor.getLine(lineNumber) === `${originalLine}x` : input?.value === `${key}x`;
+          if (!isTyped) {
             failures.push({ key, reason: 'Typing after timeout did not append at the selected field end' });
           }
           pressKey({ key: 'Backspace' });
           await pause();
+          if (!isSource) {
+            // Each case is complete. Close Obsidian's native key suggestion UI
+            // Before locating the next case's trigger underneath that UI.
+            pressKey({ key: 'Escape' });
+            await pause();
+          }
         }
         return failures;
       },
@@ -331,7 +354,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
       input: { popoutMode: popout, viewMode: mode },
       vaultPath: vault.path
     });
-    expect(failures).toEqual([]);
+    expect(result).toEqual([]);
   });
 
   it.each([false, true])('activates parent and leaf Source gutters in every scope with popout=%s', async (isPopout) => {
@@ -612,8 +635,9 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
               if (scope === 'key') {
                 // Sweep the actual key name too: the old icon-adjacent points
                 // Missed the clipped activation width of expanded parent keys.
-                const inputRect = keyInput?.getBoundingClientRect();
-                return inputRect === undefined ? [rect.left + 8, rect.left + 24]
+                const inputRect = isSourceMode ? undefined : keyInput?.getBoundingClientRect();
+                return inputRect === undefined
+? [rect.left + 8, rect.left + 24]
                   : [rect.left + 8, (inputRect.left + inputRect.right) / 2, inputRect.right - 2];
               }
               return iconRect === undefined ? [] : [(iconRect.left + iconRect.right) / 2, iconRect.left + 2, iconRect.right - 2];

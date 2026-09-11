@@ -1,19 +1,34 @@
 import type { MarkdownView } from 'obsidian';
 
 import { castTo } from 'obsidian-dev-utils/object-utils';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+ afterEach, beforeEach, describe, expect, it, vi
+} from 'vitest';
+
+import type {
+ PropertyFieldNode, SourcePropertyFieldNode
+} from './property-field-tree.ts';
 
 import { PluginSettings } from './plugin-settings.ts';
-import { buildPropertyFieldForest, flattenPropertyFieldForest, parseSourcePropertyFields, type PropertyFieldNode, type SourcePropertyFieldNode } from './property-field-tree.ts';
+import {
+ buildPropertyFieldForest, flattenPropertyFieldForest, parseSourcePropertyFields
+} from './property-field-tree.ts';
 import { PropertyFieldVisualsComponent } from './property-field-visuals.ts';
 
 interface NavigationComponent {
-  documentStates: Map<Document, { bodyStyleObserver: MutationObserver | null; cleanups: (() => void)[]; mutationObserver: MutationObserver | null; popover: HTMLElement | null }>;
+  documentStates: Map<Document, NavigationDocumentState>;
   highlightVisibleSourceLine(): void;
   observeDocument(doc: Document): void;
   schedulePopoverHide(doc: Document): void;
   showDomBreadcrumb(doc: Document, roots: PropertyFieldNode[], current: PropertyFieldNode, anchor: HTMLElement): void;
   showSourceBreadcrumb(doc: Document, roots: SourcePropertyFieldNode[], current: SourcePropertyFieldNode, anchor: HTMLElement, view: MarkdownView): void;
+}
+
+interface NavigationDocumentState {
+  bodyStyleObserver: MutationObserver | null;
+  cleanups: (() => void)[];
+  mutationObserver: MutationObserver | null;
+  popover: HTMLElement | null;
 }
 
 let component: NavigationComponent;
@@ -35,7 +50,9 @@ afterEach(() => {
   const state = component.documentStates.get(document);
   state?.mutationObserver?.disconnect();
   state?.bodyStyleObserver?.disconnect();
-  state?.cleanups.forEach((cleanup) => cleanup());
+  for (const cleanup of state?.cleanups ?? []) {
+    cleanup();
+  }
   component.documentStates.clear();
   document.body.replaceChildren();
   Reflect.deleteProperty(window.HTMLElement.prototype, 'scrollIntoView');
@@ -74,13 +91,13 @@ describe('breadcrumb navigation owns the editor caret independently of hover and
   it.each(['root', 'child'])('should single-click to the Source %s line end and retain focus after other breadcrumb hovers and timeout', (name) => {
     const text = '---\nroot:\n  child: value\n---';
     const source = document.body.createDiv({ cls: 'markdown-source-view' });
-    const content = source.createDiv({ cls: 'cm-content', attr: { tabindex: '0' } });
+    const content = source.createDiv({ attr: { tabindex: '0' }, cls: 'cm-content' });
     const line = content.createDiv({ cls: 'cm-line' });
     const setCursor = vi.fn();
     const view = castTo<MarkdownView>({
       containerEl: source,
       editor: {
-        focus: (): void => content.focus(),
+        focus: (): void => { content.focus(); },
         getLine: (index: number): string => text.split('\n')[index] ?? '',
         setCursor
       }

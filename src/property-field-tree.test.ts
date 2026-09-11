@@ -100,7 +100,7 @@ describe('property field DOM tree', () => {
 describe('source property field tree', () => {
   it.each([false, true])('should retain the reported apostrophe key and its sibling in either order (reversed=%s)', (reversed) => {
     const keys = [
-      "Chronological Release Amongst All of the Given Creator's Works",
+      'Chronological Release Amongst All of the Given Creator\'s Works',
       'Chronological Release Number Amongst This Type for the Given Creator'
     ];
     if (reversed) {
@@ -114,9 +114,9 @@ describe('source property field tree', () => {
   });
 
   it('should treat quotes inside plain keys as text and recognize only mapping separators', () => {
-    const source = `---\nCreator's Works: value\nAn unmatched " inside a key: value\nhttps://example.com: value\nitems:\n  - Creator's Works: value\n---`;
+    const source = '---\nCreator\'s Works: value\nAn unmatched " inside a key: value\nhttps://example.com: value\nitems:\n  - Creator\'s Works: value\n---';
     expect(flattenPropertyFieldForest(parseSourcePropertyFields(source)).map((node) => node.key)).toEqual([
-      "Creator's Works", 'An unmatched " inside a key', 'https://example.com', 'items', '0', "Creator's Works"
+      'Creator\'s Works', 'An unmatched " inside a key', 'https://example.com', 'items', '0', 'Creator\'s Works'
     ]);
   });
 

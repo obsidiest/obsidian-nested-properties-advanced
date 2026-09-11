@@ -26,7 +26,11 @@ Before the production edits, six parser/geometry checks and four navigation-posi
 
 The desktop suite now also tests both exact sibling names in both orders and all three Source activation scopes, checks visible static/thread connectors, sweeps the actual parent key name, and sends native single clicks followed by typing after the 20 ms timeout. The navigation cases cover root leaves, root parents, nested parents, and nested leaves in main and adopted popout windows.
 
-Windows and Linux Obsidian automation is pending publication of this commit to the existing draft PR. Local scratch has no desktop display/Xvfb. Passing desktop automation will cover its pinned Obsidian/Minimal fixture, not acceptance in the user's actual Windows vault.
+The first desktop candidate, `a198844`, passed 76/84 Linux and 77/84 Windows cases in [run 34552768237](https://github.com/obsidiest/obsidian-nested-properties-advanced/actions/runs/34552768237). The expanded Live Preview parent-name sweeps, Source single-click/post-timeout typing, and all existing history cases passed. Both reported Source sibling names activated their breadcrumbs under every tested scope. Overall desktop validation remained failing.
+
+The failures exposed test defects: the connector assertion expected the first glyph's vertical center even for wrapped property lines; Source key sweeps accidentally used zero-width hidden Live Preview input rectangles; and Live Preview navigation timed out at a trigger/exit precondition before reaching the caret assertion. The follow-up checks connector endpoints within the corresponding rendered property line, confines input rectangles to Live Preview, exits to the tab header, closes native key suggestions only after each completed typing case, and labels precondition timeouts. The shared lexer was also split into plain/quoted scanning steps during lint review, without changing its behavior.
+
+Follow-up desktop validation is pending. Local scratch has no desktop display/Xvfb. Passing desktop automation will cover its pinned Obsidian/Minimal fixture, not acceptance in the user's actual Windows vault.
 
 ## Manual acceptance still needed
 

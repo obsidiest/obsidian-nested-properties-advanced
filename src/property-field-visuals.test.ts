@@ -764,7 +764,7 @@ describe('property field visual render guards', () => {
     expect(getSourceKeyCharacterRange('  "quoted:key": value')).toEqual({ end: 15, start: 2 });
     expect(getSourceKeyCharacterRange('flow[key:part]: value')).toEqual({ end: 15, start: 0 });
     expect(getSourceKeyCharacterRange('not a mapping')).toBeNull();
-    const reportedKey = "Chronological Release Amongst All of the Given Creator's Works";
+    const reportedKey = 'Chronological Release Amongst All of the Given Creator\'s Works';
     expect(getSourceKeyCharacterRange(`    ${reportedKey}: ""`)).toEqual({ end: reportedKey.length + 5, start: 4 });
     expect(getSourceKeyCharacterRange('  - Creator\'s Works: value')).toEqual({ end: 20, start: 4 });
     expect(getSourceKeyCharacterRange('https://example.com: value')).toEqual({ end: 20, start: 0 });
