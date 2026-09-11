@@ -172,6 +172,168 @@ afterEach(async () => {
 });
 
 describe('Property interaction surfaces with Minimal and hidden titles', () => {
+  it.each([false, true])('renders guides, threads and every Source breadcrumb scope for both reported sibling names with popout=%s', async (isPopout) => {
+    const failures = await evalInObsidian({
+      callback: async ({ app, context: { markdownView, nativeInput: { moveMouse }, settingsTab }, lib: { waitUntil }, popoutMode }) => {
+        await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: 'source', source: true }, type: 'markdown' });
+        if (popoutMode) {
+          const popout = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
+          popout.win.electronWindow.focus();
+          await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === popout.doc && popout.doc.hasFocus() });
+        }
+        await settingsTab.setControlValue('isActivePropertyFieldThreadingEnabled', true);
+        await settingsTab.setControlValue('isActivePropertyFieldThreadingInMainUiEnabled', true);
+        await settingsTab.setControlValue('isNestedPropertiesMainUiStaticTreeIndentationGuidesEnabled', true);
+        await settingsTab.setControlValue('isNestedPropertiesMainUiStaticTreeIndentationGuidesInSourceModeEnabled', true);
+        const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
+        if (source === null) {
+          throw new Error('Source editor missing');
+        }
+        const doc = source.ownerDocument;
+        const keys = ["Chronological Release Amongst All of the Given Creator's Works", 'Chronological Release Number Amongst This Type for the Given Creator'];
+        const failures: object[] = [];
+        for (const reversed of [false, true]) {
+          const ordered = reversed ? [...keys].reverse() : keys;
+          markdownView.editor.setValue(`---\ncreator:\n  releases:\n${ordered.map((key) => `    ${key}: ""`).join('\n')}\n---\nBody`);
+          await waitUntil({ predicate: () => [...source.querySelectorAll('.cm-line')].some((line) => line.textContent.trimStart().startsWith(`${ordered[0]}:`)) });
+          for (const scope of ['field', 'key', 'gutter']) {
+            await settingsTab.setControlValue('isFullWidthPropertyFieldHoverActivationEnabled', scope === 'field');
+            await settingsTab.setControlValue('isFullWidthPropertyKeyHoverActivationEnabled', scope === 'key');
+            for (const key of ordered) {
+              const row = [...source.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${key}:`));
+              if (row === undefined) {
+                throw new Error(`Reported Source row missing: ${key}`);
+              }
+              const walker = doc.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+              let first: DOMRect | undefined;
+              for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+                const start = node.textContent?.search(/\S/u) ?? -1;
+                if (start >= 0) {
+                  const range = doc.createRange();
+                  range.setStart(node, start);
+                  range.setEnd(node, start + 1);
+                  first = range.getBoundingClientRect();
+                  break;
+                }
+              }
+              if (first === undefined) {
+                throw new Error('Source text geometry missing');
+              }
+              const surface = source.getBoundingClientRect();
+              const y = (first.top + first.bottom) / 2;
+              const x = scope === 'field' ? surface.right - 24 : scope === 'key' ? first.left + first.width * 2 : first.left - first.height / 2;
+              moveMouse({ x, y });
+              await new Promise<void>((resolve) => doc.win.setTimeout(resolve, 180));
+              function hasConnector(selector: string): boolean {
+                return [...source!.querySelectorAll<SVGPathElement>(selector)].some((path) => {
+                  const endpoint = path.getPointAtLength(path.getTotalLength());
+                  const svgTop = path.ownerSVGElement?.getBoundingClientRect().top ?? 0;
+                  const style = doc.win.getComputedStyle(path);
+                  return Math.abs(svgTop + endpoint.y - y) < 4 && path.getTotalLength() > 0
+                    && style.visibility === 'visible' && style.stroke !== 'none' && Number.parseFloat(style.strokeWidth) > 0;
+                });
+              }
+              const breadcrumb = doc.querySelector('.np-property-breadcrumb-popover .is-current button')?.textContent;
+              const guides = hasConnector('.np-property-source-overlay .np-property-guide-static');
+              const threads = hasConnector('.np-property-source-overlay .np-property-thread-active');
+              const highlight = source.querySelector('.np-property-field-source-highlight')?.textContent.trimStart().startsWith(`${key}:`);
+              if (breadcrumb !== key || !guides || !threads || !highlight) {
+                failures.push({ breadcrumb, guides, highlight, key, reversed, scope, threads });
+              }
+              moveMouse({ x: surface.right - 4, y: surface.top + 2 });
+              await waitUntil({ predicate: () => doc.querySelector('.np-property-breadcrumb-popover') === null });
+            }
+          }
+        }
+        return failures;
+      },
+      contextId,
+      input: { popoutMode: isPopout },
+      vaultPath: vault.path
+    });
+    expect(failures).toEqual([]);
+  });
+
+  it.each(['live-preview', 'source'].flatMap((mode) => [false, true].map((popout) => ({ mode, popout }))))('retains the end caret and accepts typing after one breadcrumb click and timeout in $mode with popout=$popout', async ({ mode, popout }) => {
+    const failures = await evalInObsidian({
+      callback: async ({ app, context: { markdownView, nativeInput: { clickElement, moveMouse, pressKey }, settingsTab }, lib: { waitUntil }, popoutMode, viewMode }) => {
+        const isSource = viewMode === 'source';
+        await markdownView.leaf.setViewState({ state: { file: 'property-runtime.md', mode: 'source', source: isSource }, type: 'markdown' });
+        if (popoutMode) {
+          const popout = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
+          popout.win.electronWindow.focus();
+          await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === popout.doc && popout.doc.hasFocus() });
+        }
+        await settingsTab.setControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds', 0.02);
+        const source = markdownView.containerEl.querySelector<HTMLElement>('.markdown-source-view');
+        if (source === null) {
+          throw new Error('Navigation surface missing');
+        }
+        const doc = source.ownerDocument;
+        const failures: object[] = [];
+        function pause(): Promise<void> {
+          return new Promise((resolve) => doc.win.setTimeout(resolve, 100));
+        }
+        for (const key of ['root', 'nested', 'child', 'leaf']) {
+          const triggerKey = key === 'root' ? 'root' : 'leaf';
+          const row = isSource
+            ? [...source.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${key}:`))
+            : [...source.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((input) => input.value === key);
+          const trigger = isSource
+            ? [...source.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.trimStart().startsWith(`${triggerKey}:`))
+            : [...source.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((input) => input.value === triggerKey);
+          if (row === undefined || trigger === undefined) {
+            throw new Error(`Navigation row missing: ${key}`);
+          }
+          const rect = trigger.getBoundingClientRect();
+          moveMouse({ x: rect.left + 5, y: (rect.top + rect.bottom) / 2 });
+          await waitUntil({ predicate: () => doc.querySelector('.np-property-breadcrumb-popover .is-current button')?.textContent === triggerKey });
+          const button = [...doc.querySelectorAll<HTMLButtonElement>('.np-property-breadcrumb-key')].find((entry) => entry.textContent === key);
+          if (button === undefined) {
+            throw new Error('Navigation button missing');
+          }
+          const lineNumber = markdownView.editor.getValue().split('\n').findIndex((line) => line.trimStart().startsWith(`${key}:`));
+          const originalLine = markdownView.editor.getLine(lineNumber);
+          clickElement({ element: button });
+          await pause();
+          // A second hover must preview another ancestor without reclaiming focus.
+          const other = [...doc.querySelectorAll<HTMLButtonElement>('.np-property-breadcrumb-key')].find((entry) => entry !== button);
+          if (other !== undefined) {
+            const otherRect = other.getBoundingClientRect();
+            moveMouse({ x: (otherRect.left + otherRect.right) / 2, y: (otherRect.top + otherRect.bottom) / 2 });
+            await pause();
+          }
+          const surface = source.getBoundingClientRect();
+          moveMouse({ x: surface.right - 4, y: surface.top + 2 });
+          await waitUntil({ predicate: () => doc.querySelector('.np-property-breadcrumb-popover') === null });
+          await pause();
+          const input = isSource ? null : row as HTMLInputElement;
+          const cursor = markdownView.editor.getCursor();
+          const focused = isSource ? markdownView.editor.hasFocus() : doc.activeElement === input;
+          const atEnd = isSource ? cursor.line === lineNumber && cursor.ch === originalLine.length
+            : input?.selectionStart === key.length && input.selectionEnd === key.length;
+          if (!focused || !atEnd) {
+            failures.push({ active: doc.activeElement?.outerHTML.slice(0, 300), atEnd, cursor, focused, key });
+            continue;
+          }
+          pressKey({ key: 'x' });
+          await pause();
+          const typed = isSource ? markdownView.editor.getLine(lineNumber) === `${originalLine}x` : input?.value === `${key}x`;
+          if (!typed) {
+            failures.push({ key, reason: 'Typing after timeout did not append at the selected field end' });
+          }
+          pressKey({ key: 'Backspace' });
+          await pause();
+        }
+        return failures;
+      },
+      contextId,
+      input: { popoutMode: popout, viewMode: mode },
+      vaultPath: vault.path
+    });
+    expect(failures).toEqual([]);
+  });
+
   it.each([false, true])('activates parent and leaf Source gutters in every scope with popout=%s', async (isPopout) => {
     const result = await evalInObsidian({
       callback: async ({ app, context: { markdownView, nativeInput: { moveMouse }, settingsTab }, lib: { waitUntil }, popoutMode }) => {
@@ -448,7 +610,11 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
                 return [surface.left + 4, rect.left + 8, (rect.left + rect.right) / 2, surface.right - 24];
               }
               if (scope === 'key') {
-                return [rect.left + 8, rect.left + 24];
+                // Sweep the actual key name too: the old icon-adjacent points
+                // Missed the clipped activation width of expanded parent keys.
+                const inputRect = keyInput?.getBoundingClientRect();
+                return inputRect === undefined ? [rect.left + 8, rect.left + 24]
+                  : [rect.left + 8, (inputRect.left + inputRect.right) / 2, inputRect.right - 2];
               }
               return iconRect === undefined ? [] : [(iconRect.left + iconRect.right) / 2, iconRect.left + 2, iconRect.right - 2];
             }

@@ -81,6 +81,9 @@ describe('NestedPropertiesPluginSettingTab', () => {
     expect(definitions).toHaveLength(6);
     expect(new Set(controls.map((control) => control.key))).toEqual(new Set(settingsKeys));
     expect(definitions.map((definition) => definition.heading)).toContain('Hover Breadcrumb Popover Timeout');
+    for (const mode of ['Live Preview', 'Source', 'Reading']) {
+      expect(items.map((item) => item.name)).toContain(`${mode} Mode Hover Breadcrumb Popover Timeout`);
+    }
     expect(items.every((item) => item.aliases !== undefined && item.aliases.length > 0 && item.desc !== undefined && item.name !== undefined)).toBe(true);
     expect(items.map((item) => item.name)).toContain('Property Field Hover Breadcrumb Activation Scope');
     expect(items.map((item) => item.name)).toContain('Property Field Threading');

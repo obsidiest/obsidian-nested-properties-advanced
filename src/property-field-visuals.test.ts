@@ -653,10 +653,29 @@ describe('property field visual render guards', () => {
     container.remove();
   });
 
+  it.each([false, true])('should use the full expanded parent key above its indented child container (nested=%s)', (nested) => {
+    const container = document.body.createDiv({ cls: 'metadata-container' });
+    const parent = nested ? container.createDiv({ cls: 'metadata-property' }).createDiv({ cls: 'metadata-property-value' }) : container;
+    const property = parent.createDiv({ cls: 'metadata-property' });
+    const key = property.createDiv({ cls: 'metadata-property-key', text: 'Expanded parent property' });
+    const value = property.createDiv({ cls: 'metadata-property-value' });
+    value.createDiv({ cls: 'metadata-property' }).createDiv({ cls: 'metadata-property-key' });
+    vi.spyOn(key, 'getBoundingClientRect').mockReturnValue({ bottom: 40, height: 20, left: 10, right: 400, top: 20, width: 390 } as DOMRect);
+    vi.spyOn(value, 'getBoundingClientRect').mockReturnValue({ bottom: 200, height: 156, left: 30, right: 900, top: 44, width: 870 } as DOMRect);
+
+    for (const x of [45, 200, 398]) {
+      expect(resolveDomBreadcrumbPropertyAtPointer(key, x, 30, 'key')).toBe(property);
+    }
+    expect(resolveDomBreadcrumbPropertyAtPointer(key, 410, 30, 'key')).toBeNull();
+    expect(resolveDomBreadcrumbPropertyAtPointer(key, 200, 60, 'key')).toBeNull();
+    container.remove();
+  });
+
   it('should leave key/icon activation immediately but retain the popover for one non-renewing timeout', () => {
     vi.useFakeTimers();
     Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
     const settings = new PluginSettings();
+    settings.globalHoverBreadcrumbPopoverTimeoutSeconds = 1;
     settings.isFullWidthPropertyFieldHoverActivationEnabled = false;
     settings.isFullWidthPropertyKeyHoverActivationEnabled = true;
     const component = castTo<TestPropertyFieldVisualsComponent>(
@@ -745,6 +764,10 @@ describe('property field visual render guards', () => {
     expect(getSourceKeyCharacterRange('  "quoted:key": value')).toEqual({ end: 15, start: 2 });
     expect(getSourceKeyCharacterRange('flow[key:part]: value')).toEqual({ end: 15, start: 0 });
     expect(getSourceKeyCharacterRange('not a mapping')).toBeNull();
+    const reportedKey = "Chronological Release Amongst All of the Given Creator's Works";
+    expect(getSourceKeyCharacterRange(`    ${reportedKey}: ""`)).toEqual({ end: reportedKey.length + 5, start: 4 });
+    expect(getSourceKeyCharacterRange('  - Creator\'s Works: value')).toEqual({ end: 20, start: 4 });
+    expect(getSourceKeyCharacterRange('https://example.com: value')).toEqual({ end: 20, start: 0 });
   });
 
   it('should resolve only lines owned by the active CodeMirror viewport', () => {

@@ -98,6 +98,28 @@ describe('property field DOM tree', () => {
 });
 
 describe('source property field tree', () => {
+  it.each([false, true])('should retain the reported apostrophe key and its sibling in either order (reversed=%s)', (reversed) => {
+    const keys = [
+      "Chronological Release Amongst All of the Given Creator's Works",
+      'Chronological Release Number Amongst This Type for the Given Creator'
+    ];
+    if (reversed) {
+      keys.reverse();
+    }
+    const nodes = flattenPropertyFieldForest(parseSourcePropertyFields(`---\ncreator:\n  releases:\n${keys.map((key) => `    ${key}: ""`).join('\n')}\n---`));
+    expect(nodes.map((node) => [node.key, node.depth])).toEqual([
+      ['creator', 0], ['releases', 1], ...keys.map((key) => [key, 2])
+    ]);
+    expect(nodes.slice(2).map((node) => node.parent?.key)).toEqual(['releases', 'releases']);
+  });
+
+  it('should treat quotes inside plain keys as text and recognize only mapping separators', () => {
+    const source = `---\nCreator's Works: value\nAn unmatched " inside a key: value\nhttps://example.com: value\nitems:\n  - Creator's Works: value\n---`;
+    expect(flattenPropertyFieldForest(parseSourcePropertyFields(source)).map((node) => node.key)).toEqual([
+      "Creator's Works", 'An unmatched " inside a key', 'https://example.com', 'items', '0', "Creator's Works"
+    ]);
+  });
+
   it('should parse nested mappings only from frontmatter', () => {
     const roots = parseSourcePropertyFields(`---
 root:

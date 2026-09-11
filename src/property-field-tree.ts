@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/array-type, @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/prefer-nullish-coalescing, complexity, func-style, no-magic-numbers, no-restricted-syntax, perfectionist/sort-modules, perfectionist/sort-union-types, prefer-named-capture-group, unicorn/prefer-single-call, unicorn/prefer-spread -- YAML property trees require ordered stack mutations and compact parser result shapes; these local exceptions keep that algorithm legible. */
 
+import { findSourceMappingColon } from './source-property-key.ts';
+
 export interface PropertyFieldNode {
   children: PropertyFieldNode[];
   depth: number;
@@ -226,45 +228,18 @@ function isBlockScalarValue(value: string): boolean {
 }
 
 function parseMapping(content: string): null | { column: number; hasNestedValue: boolean; isBlockScalar: boolean; key: string } {
-  let quote: '"' | '\'' | null = null;
-  let bracketDepth = 0;
-  for (let index = 0; index < content.length; index++) {
-    const character = content[index];
-    if (quote !== null) {
-      if (character === quote && (quote === '\'' || content[index - 1] !== '\\')) {
-        quote = null;
-      }
-      continue;
-    }
-    if (character === '"' || character === '\'') {
-      quote = character;
-      continue;
-    }
-    if (character === '[' || character === '{') {
-      bracketDepth += 1;
-      continue;
-    }
-    if (character === ']' || character === '}') {
-      bracketDepth = Math.max(0, bracketDepth - 1);
-      continue;
-    }
-    if (character !== ':' || bracketDepth !== 0) {
-      continue;
-    }
-    const rawKey = content.slice(0, index).trim();
-    if (rawKey === '') {
-      return null;
-    }
-    const keyColumn = content.indexOf(rawKey);
-    const rawValue = content.slice(index + 1).trim();
-    return {
-      column: keyColumn,
-      hasNestedValue: rawValue === '',
-      isBlockScalar: isBlockScalarValue(rawValue),
-      key: unquote(rawKey)
-    };
+  const colon = findSourceMappingColon(content);
+  if (colon === -1) {
+    return null;
   }
-  return null;
+  const rawKey = content.slice(0, colon).trim();
+  const rawValue = content.slice(colon + 1).trim();
+  return {
+    column: content.indexOf(rawKey),
+    hasNestedValue: rawValue === '',
+    isBlockScalar: isBlockScalarValue(rawValue),
+    key: unquote(rawKey)
+  };
 }
 
 function unquote(value: string): string {

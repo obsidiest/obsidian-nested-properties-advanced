@@ -39,6 +39,7 @@ import {
   sourceFieldHighlightEffect,
   sourceFieldHighlightState
 } from './source-field-highlight.ts';
+import { findSourceMappingColon } from './source-property-key.ts';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const OWNED_VISUAL_SELECTOR = '.np-property-tree-overlay, .np-property-source-overlay, .np-property-breadcrumb-popover';
@@ -1338,8 +1339,7 @@ export class PropertyFieldVisualsComponent extends Component {
     const entries = createBreadcrumbEntries(nodes, current);
     this.showBreadcrumb(ownerDocument, entries, anchor, (node) => {
       node.keyElement.scrollIntoView({ block: 'center', inline: 'nearest' });
-      const focusTarget = node.keyElement.querySelector<HTMLElement>('input, [contenteditable], button') ?? node.valueElement?.querySelector<HTMLElement>('input, textarea, [contenteditable]') ?? node.keyElement;
-      focusTarget.focus({ preventScroll: true });
+      focusPropertyKeyEnd(node.keyElement);
     }, (node) => {
       for (const element of ownerDocument.querySelectorAll('.np-property-field-popover-highlight')) {
         element.classList.remove('np-property-field-popover-highlight');
@@ -1366,7 +1366,7 @@ export class PropertyFieldVisualsComponent extends Component {
       ? flattenPropertyFieldForest([root])
       : getPropertyFieldAncestors(current);
     this.showBreadcrumb(ownerDocument, createBreadcrumbEntries(nodes, current), anchor, (node) => {
-      view.editor.setCursor({ ch: node.column, line: node.line });
+      view.editor.setCursor({ ch: view.editor.getLine(node.line).length, line: node.line });
       view.editor.focus();
     }, (node) => {
       if (!settings.isActiveCursorPropertyFieldThreadingEnabled && this.isMainThreadingEnabled('source')) {
@@ -1403,9 +1403,13 @@ export class PropertyFieldVisualsComponent extends Component {
       row.setAttribute('role', 'treeitem');
       row.setAttribute('aria-current', entry.current ? 'true' : 'false');
       const button = row.createEl('button', { cls: 'np-property-breadcrumb-key', text: entry.node.key, type: 'button' });
-      button.addEventListener('click', () => onNavigate(entry.node));
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        onNavigate(entry.node);
+      });
       button.addEventListener('mouseenter', () => {
-        button.focus({ preventScroll: true });
+        // Hover previews a field. Only an explicit click or keyboard activation
+        // Transfers the caret; later pointer movement must not blur that editor.
         onHighlight(entry.node);
       });
       button.addEventListener('focus', () => onHighlight(entry.node));
@@ -2240,52 +2244,11 @@ export function getSourceKeyCharacterRange(text: string): null | { end: number; 
     if (start >= text.length) {
       return { end: sequenceStart + 1, start: sequenceStart };
     }
-    const mappingColon = findYamlMappingColon(text, start);
+    const mappingColon = findSourceMappingColon(text, start);
     return mappingColon === -1 ? { end: sequenceStart + 1, start: sequenceStart } : { end: mappingColon + 1, start };
   }
-  const mappingColon = findYamlMappingColon(text, start);
+  const mappingColon = findSourceMappingColon(text, start);
   return mappingColon === -1 ? null : { end: mappingColon + 1, start };
-}
-
-function findYamlMappingColon(text: string, start: number): number {
-  let bracketDepth = 0;
-  let quote: '"' | '\'' | null = null;
-  for (let index = start; index < text.length; index++) {
-    const character = text[index];
-    if (quote !== null) {
-      if (character === quote && (quote === '\'' || text[index - 1] !== '\\')) {
-        quote = null;
-      }
-      continue;
-    }
-    switch (character) {
-      case ':': {
-        if (bracketDepth === 0) {
-          return index;
-        }
-        break;
-      }
-      case '\'':
-      case '"': {
-        quote = character;
-        break;
-      }
-      case '[':
-      case '{': {
-        bracketDepth += 1;
-        break;
-      }
-      case ']':
-      case '}': {
-        bracketDepth = Math.max(0, bracketDepth - 1);
-        break;
-      }
-      default: {
-        break;
-      }
-    }
-  }
-  return -1;
 }
 
 function createTextRange(element: HTMLElement, start: number, end: number): Range | null {
@@ -2429,10 +2392,35 @@ function getDomPropertyHorizontalRect(property: HTMLElement, fallback: Pick<DOMR
 function getDomPropertyKeyActivationRect(property: HTMLElement, key: HTMLElement): Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'> {
   const keyRect = key.getBoundingClientRect();
   const valueRect = property.querySelector<HTMLElement>(':scope > .metadata-property-value')?.getBoundingClientRect();
-  const right = valueRect !== undefined && valueRect.left > keyRect.left
+  // Expanded parents wrap the indented child container below the key. Only a
+  // Value sharing the key's vertical row can bound that key horizontally.
+  const overlapsKeyRow = valueRect !== undefined && valueRect.top < keyRect.bottom && valueRect.bottom > keyRect.top;
+  const right = overlapsKeyRow && valueRect.left > keyRect.left
     ? Math.min(keyRect.right, valueRect.left)
     : keyRect.right;
   return { bottom: keyRect.bottom, left: keyRect.left, right: Math.max(keyRect.left, right), top: keyRect.top };
+}
+
+function focusPropertyKeyEnd(key: HTMLElement): void {
+  const input = key.querySelector<HTMLInputElement>('input.metadata-property-key-input');
+  if (input !== null) {
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+    return;
+  }
+  const editable = key.querySelector<HTMLElement>('[contenteditable="true"]');
+  if (editable !== null) {
+    editable.focus({ preventScroll: true });
+    const range = key.ownerDocument.createRange();
+    range.selectNodeContents(editable);
+    range.collapse(false);
+    const selection = key.ownerDocument.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    return;
+  }
+  key.tabIndex = -1;
+  key.focus({ preventScroll: true });
 }
 
 function getDomPropertyToggleActivationRects(property: HTMLElement): Array<Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>> {
