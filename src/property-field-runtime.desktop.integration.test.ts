@@ -173,9 +173,12 @@ afterEach(async () => {
 });
 
 describe('Property interaction surfaces with Minimal and hidden titles', () => {
-  it.each(['emptyScalar', 'root', 'nested', 'leaf'].flatMap((key) => [false, true].map((popout) => ({ key, popout }))))('keeps the committed $key rename after metadata refresh, Enter and Escape with popout=$popout', async ({ key, popout }) => {
+  it.each([
+    ...['emptyScalar', 'root', 'nested', 'leaf'].map((key) => ({ draftAfterEnter: false, key })),
+    ...['emptyScalar', 'root', 'nested'].map((key) => ({ draftAfterEnter: true, key }))
+  ].flatMap((testCase) => [false, true].map((popout) => ({ ...testCase, popout }))))('keeps the committed $key rename after metadata refresh, Enter and Escape with popout=$popout and draftAfterEnter=$draftAfterEnter', async ({ draftAfterEnter, key, popout }) => {
     const result = await evalInObsidian({
-      callback: async ({ app, context: { markdownView, nativeInput: { clickElement, pressKey } }, keyName, lib: { waitUntil }, popoutMode }) => {
+      callback: async ({ app, context: { markdownView, nativeInput: { clickElement, moveMouse, pressKey } }, isDraftAfterEnter, keyName, lib: { waitUntil }, popoutMode }) => {
         if (popoutMode) {
           const window = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
           window.win.electronWindow.focus();
@@ -222,8 +225,19 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
             originalEntry: originalEntry.key
           };
         }
-        clickElement({ element: input });
-        await waitUntil({ message: 'Native key click did not focus the input', predicate: () => doc.activeElement === input });
+        async function clickKey(keyInput: HTMLInputElement): Promise<void> {
+          // Popout adoption and metadata refresh can expose a new row beneath
+          // The stationary pointer. Clear its breadcrumb before the edit click.
+          const outside = markdownView.leaf.tabHeaderEl.getBoundingClientRect();
+          moveMouse({ x: (outside.left + outside.right) / 2, y: (outside.top + outside.bottom) / 2 });
+          await waitUntil({ message: 'Breadcrumb still covers the key before editing', predicate: () => doc.querySelector('.np-property-breadcrumb-popover') === null });
+          clickElement({ element: keyInput });
+          await waitUntil({
+            message: `Native key click did not focus the input: ${JSON.stringify({ active: doc.activeElement?.outerHTML.slice(0, 300), bounds: keyInput.getBoundingClientRect(), connected: keyInput.isConnected })}`,
+            predicate: () => doc.activeElement === keyInput
+          });
+        }
+        await clickKey(input);
         pressKey({ key: 'a', modifiers: ['Ctrl'] });
         for (const character of renamed) {
           pressKey({ key: character });
@@ -234,6 +248,16 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         // Or a value-focus handoff before sending Escape: those are outcomes.
         await pause();
         const afterEnter = snapshot(input, property.entry.key);
+        if (isDraftAfterEnter) {
+          // Also exercise cancellation from a leaf key after the native value
+          // Focus handoff, without changing the original Enter/Escape cases.
+          await clickKey(property.keyInputEl);
+          pressKey({ key: 'a', modifiers: ['Ctrl'] });
+          for (const character of 'unfinished draft') {
+            pressKey({ key: character });
+          }
+          await waitUntil({ predicate: () => property.keyInputEl.value === 'unfinished draft' });
+        }
         pressKey({ key: 'Escape' });
         await pause();
         const afterEscape = snapshot(input, property.entry.key);
@@ -253,7 +277,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         };
       },
       contextId,
-      input: { keyName: key, popoutMode: popout },
+      input: { isDraftAfterEnter: draftAfterEnter, keyName: key, popoutMode: popout },
       vaultPath: vault.path
     });
     expect(result, JSON.stringify({ afterEnter: result.afterEnter, afterEscape: result.afterEscape })).toMatchObject({

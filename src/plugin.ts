@@ -11,6 +11,7 @@ import { NestedPropertiesPluginSettingTab } from './plugin-setting-tab.ts';
 import { PluginSettingsComponent } from './plugin-settings-component.ts';
 import { PluginSettings } from './plugin-settings.ts';
 import { PropertyFieldVisualsComponent } from './property-field-visuals.ts';
+import { RootPropertyKeyEditingComponent } from './root-property-key-editing.ts';
 import { StyleSettingsPrecisionControls } from './style-settings-precision.ts';
 
 export class Plugin extends PluginBase {
@@ -29,6 +30,8 @@ export class Plugin extends PluginBase {
     // Note's initial header-toggle states during its synchronous load, so wait for persisted settings
     // Before constructing it.
     await pluginSettingsComponent.loadWithPromises();
+
+    this.addChild(new RootPropertyKeyEditingComponent({ app: this.app }));
 
     const nestedPropertyRendererComponent = this.addChild(
       new NestedPropertyRendererComponent({

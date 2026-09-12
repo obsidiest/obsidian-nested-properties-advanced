@@ -152,6 +152,10 @@ vi.mock('./patches/nested-property-search-patch-component.ts', async () => ({
   NestedPropertySearchPatchComponent: await loadablePlainComponentStub()
 }));
 
+vi.mock('./root-property-key-editing.ts', async () => ({
+  RootPropertyKeyEditingComponent: await loadablePlainComponentStub()
+}));
+
 // `OpenDemoVaultCommandHandler` is registered through the real `commandHandlerComponent`, which calls
 // `buildCommand()` then `onRegistered()` on each handler — so the stub must supply both (a minimal command
 // And a noop) to keep that real registration path working; the constructor spy is what the test asserts on.

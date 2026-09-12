@@ -2,6 +2,7 @@
 
 ## 2.0.0
 
+- fix: cancel Live Preview root-key drafts against the current metadata entry so Escape preserves an Enter-committed rename after metadata refresh
 - fix: share Source mapping-key boundaries so apostrophes in plain property names retain guides, threading, and hover activation
 - fix: measure expanded parent key hover regions independently of child containers positioned below them
 - feat: single-click breadcrumb navigation places the caret at the key end in Live Preview and Source, with hover previews independent of keyboard focus
