@@ -173,6 +173,97 @@ afterEach(async () => {
 });
 
 describe('Property interaction surfaces with Minimal and hidden titles', () => {
+  it.each(['emptyScalar', 'root', 'nested', 'leaf'].flatMap((key) => [false, true].map((popout) => ({ key, popout }))))('keeps the committed $key rename after metadata refresh, Enter and Escape with popout=$popout', async ({ key, popout }) => {
+    const result = await evalInObsidian({
+      callback: async ({ app, context: { markdownView, nativeInput: { clickElement, pressKey } }, keyName, lib: { waitUntil }, popoutMode }) => {
+        if (popoutMode) {
+          const window = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
+          window.win.electronWindow.focus();
+          await waitUntil({ predicate: () => markdownView.containerEl.ownerDocument === window.doc && window.doc.hasFocus() });
+        }
+        const nativeRootKey = keyName === 'leaf' ? 'nested' : keyName;
+        const property = markdownView.metadataEditor.rendered.find((row) => row.entry.key === nativeRootKey);
+        const file = app.vault.getFileByPath('property-runtime.md');
+        if (property === undefined || file === null) {
+          throw new Error('Root property fixture missing');
+        }
+        const originalEntry = property.entry;
+        const originalInput = property.keyInputEl;
+        // Update another field through the vault so Obsidian performs its real
+        // Metadata synchronization while retaining the existing root control.
+        await app.vault.modify(file, markdownView.editor.getValue().replace('filler0: value', 'filler0: refreshed'));
+        await waitUntil({
+          message: 'Metadata refresh did not replace the entry of the retained root control',
+          predicate: () => property.entry !== originalEntry && markdownView.editor.getValue().includes('filler0: refreshed')
+        });
+        if (!originalInput.isConnected || property.keyInputEl !== originalInput) {
+          throw new Error('Metadata refresh replaced the input instead of reusing it');
+        }
+        const input = [...markdownView.containerEl.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((candidate) => candidate.value === keyName);
+        if (input === undefined) {
+          throw new Error('Key input missing after refresh');
+        }
+        const renamed = `${keyName}Renamed`;
+        const originalValue = JSON.stringify(property.entry.value);
+        if (originalValue === undefined) {
+          throw new Error('Fixture property value is missing');
+        }
+        const doc = input.ownerDocument;
+        async function pause(): Promise<void> {
+          await new Promise<void>((resolve) => {
+            doc.win.setTimeout(resolve, 1000);
+          });
+        }
+        function snapshot(keyInput: HTMLInputElement, entryKey: string): object {
+          return {
+            active: doc.activeElement?.className,
+            input: keyInput.value,
+            liveEntry: entryKey,
+            originalEntry: originalEntry.key
+          };
+        }
+        clickElement({ element: input });
+        await waitUntil({ message: 'Native key click did not focus the input', predicate: () => doc.activeElement === input });
+        pressKey({ key: 'a', modifiers: ['Ctrl'] });
+        for (const character of renamed) {
+          pressKey({ key: character });
+        }
+        await waitUntil({ predicate: () => input.value === renamed });
+        pressKey({ key: 'Enter' });
+        // Match the recording's human pause. Do not require a successful commit
+        // Or a value-focus handoff before sending Escape: those are outcomes.
+        await pause();
+        const afterEnter = snapshot(input, property.entry.key);
+        pressKey({ key: 'Escape' });
+        await pause();
+        const afterEscape = snapshot(input, property.entry.key);
+        const isNested = keyName === 'leaf';
+        const renamedInput = [...markdownView.containerEl.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((candidate) => candidate.value === renamed);
+        const renamedRoot = markdownView.metadataEditor.rendered.find((row) => row.entry.key === (isNested ? 'nested' : renamed));
+        const value = renamedRoot?.entry.value;
+        const expectedValue = isNested ? originalValue.replace('"leaf":', '"leafRenamed":') : originalValue;
+        const saved = await app.vault.read(file);
+        return {
+          afterEnter,
+          afterEscape,
+          fileHasRename: saved.includes(`${renamed}:`),
+          inputHasRename: renamedInput !== undefined,
+          preservedValue: JSON.stringify(value) === expectedValue,
+          sourceHasRename: markdownView.editor.getValue().includes(`${renamed}:`)
+        };
+      },
+      contextId,
+      input: { keyName: key, popoutMode: popout },
+      vaultPath: vault.path
+    });
+    expect(result, JSON.stringify({ afterEnter: result.afterEnter, afterEscape: result.afterEscape })).toMatchObject({
+      fileHasRename: true,
+      inputHasRename: true,
+      preservedValue: true,
+      sourceHasRename: true
+    });
+  });
+
   it.each([false, true])('renders guides, threads and every Source breadcrumb scope for both reported sibling names with popout=%s', async (isPopout) => {
     const result = await evalInObsidian({
       // eslint-disable-next-line complexity -- Keep native pointer movement and its geometry evidence in the serialized Obsidian callback.
