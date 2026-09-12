@@ -23,6 +23,8 @@ import {
   it
 } from 'vitest';
 
+import { writeDesktopFixtures } from '../scripts/desktop-fixtures.ts';
+
 const vault = getTemporaryVault();
 
 interface Context {
@@ -35,8 +37,8 @@ interface Context {
 
 const contextId = new ContextId<Context>();
 
-beforeEach(() => {
-  vault.populate({
+beforeEach(async () => {
+  await writeDesktopFixtures(vault.path, {
     'test.md': `---
 simpleList:
   - a
@@ -61,7 +63,7 @@ versions:
 });
 
 beforeAll(async () => {
-  vault.populate({
+  await writeDesktopFixtures(vault.path, {
     'test.md': ''
   });
   await evalInObsidian({
