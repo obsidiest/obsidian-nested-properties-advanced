@@ -20,6 +20,8 @@ level1Nested:
 
 <!-- markdownlint-disable MD033 -->
 
+## Feature Preview
+
 (Main Settings) Active Property Field Threading Toggle ENABLED; (Style Settings) Global Override Property Field Thread Colors Toggle ENABLED - Default Color; Active Property Field Threading in Main UI ENABLED; Property Field Threading in Live Preview ENABLED
 <img width="2558" height="1438" alt="Live Preview Mode Example" src="https://github.com/user-attachments/assets/d2cf97d9-0970-4a11-8526-11b498008e07" />
 
