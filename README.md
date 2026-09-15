@@ -20,26 +20,12 @@ level1Nested:
 
 <!-- markdownlint-disable MD033 -->
 
-<a href="https://github.com/obsidiest/obsidian-nested-properties-advanced/blob/HEAD/images/screenshots/screenshot-desktop-1.png"><img src="images/screenshots/screenshot-desktop-1.png" alt="Without the plugin: nested values have nowhere to go" width="600"></a>
+(Main Settings) Active Property Field Threading Toggle ENABLED; (Style Settings) Global Override Property Field Thread Colors Toggle ENABLED - Default Color; Active Property Field Threading in Main UI ENABLED; Property Field Threading in Live Preview ENABLED
+<img width="2558" height="1438" alt="Live Preview Mode Example" src="https://github.com/user-attachments/assets/d2cf97d9-0970-4a11-8526-11b498008e07" />
 
-<details>
-<summary>More screenshots</summary>
+(Main Settings) Active Property Field Threading Toggle ENABLED; (Style Settings) Global Override Property Field Thread Colors Toggle ENABLED - Default Color; Active Property Field Threading in Main UI ENABLED; Property Field Threading in Source Mode ENABLED
+<img width="2558" height="1438" alt="Source Mode Example" src="https://github.com/user-attachments/assets/003fa435-ded9-4357-acef-a1f3d85f6aa5" />
 
-<div>
-<a href="https://github.com/obsidiest/obsidian-nested-properties-advanced/blob/HEAD/images/screenshots/screenshot-desktop-2.png"><img src="images/screenshots/screenshot-desktop-2.png" alt="With it: every nested key on its own row" width="600"></a>
-<a href="https://github.com/obsidiest/obsidian-nested-properties-advanced/blob/HEAD/images/screenshots/screenshot-desktop-3.png"><img src="images/screenshots/screenshot-desktop-3.png" alt="Arrays nest too, including arrays of objects" width="600"></a>
-<a href="https://github.com/obsidiest/obsidian-nested-properties-advanced/blob/HEAD/images/screenshots/screenshot-desktop-4.png"><img src="images/screenshots/screenshot-desktop-4.png" alt="Cut, copy, paste or remove any node" width="600"></a>
-<a href="https://github.com/obsidiest/obsidian-nested-properties-advanced/blob/HEAD/images/screenshots/screenshot-desktop-5.png"><img src="images/screenshots/screenshot-desktop-5.png" alt="Rename a nested key in every note at once" width="600"></a>
-<a href="https://github.com/obsidiest/obsidian-nested-properties-advanced/blob/HEAD/images/screenshots/screenshot-mobile-1.png"><img src="images/screenshots/screenshot-mobile-1.png" alt="Without the plugin: nested values have nowhere to go" width="270"></a>
-<a href="https://github.com/obsidiest/obsidian-nested-properties-advanced/blob/HEAD/images/screenshots/screenshot-mobile-2.png"><img src="images/screenshots/screenshot-mobile-2.png" alt="With it: every nested key on its own row" width="270"></a>
-<a href="https://github.com/obsidiest/obsidian-nested-properties-advanced/blob/HEAD/images/screenshots/screenshot-mobile-3.png"><img src="images/screenshots/screenshot-mobile-3.png" alt="Arrays nest too, including arrays of objects" width="270"></a>
-<a href="https://github.com/obsidiest/obsidian-nested-properties-advanced/blob/HEAD/images/screenshots/screenshot-mobile-4.png"><img src="images/screenshots/screenshot-mobile-4.png" alt="Cut, copy, paste or remove any node" width="270"></a>
-<a href="https://github.com/obsidiest/obsidian-nested-properties-advanced/blob/HEAD/images/screenshots/screenshot-mobile-5.png"><img src="images/screenshots/screenshot-mobile-5.png" alt="Show long keys in full instead of truncated" width="270"></a>
-</div>
-
-</details>
-
-<!-- markdownlint-enable MD033 -->
 
 ## Demo vault
 
