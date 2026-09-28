@@ -33,8 +33,8 @@ describe('property field feature release quality', () => {
     const packageJson = JSON.parse(readRepoFile('package.json')) as Record<string, unknown>;
     const styleSource = readRepoFile('src/styles/main.scss');
 
-    expect(manifest).toEqual(expect.objectContaining({ id: 'nested-properties-advanced', name: 'Nested Properties Advanced', version: '2.0.0' }));
-    expect(packageJson).toEqual(expect.objectContaining({ name: 'nested-properties-advanced', version: '2.0.0' }));
+    expect(manifest).toEqual(expect.objectContaining({ id: 'nested-properties-advanced', name: 'Nested Properties Advanced', version: '2.1.0' }));
+    expect(packageJson).toEqual(expect.objectContaining({ name: 'nested-properties-advanced', version: '2.1.0' }));
     expect(packageJson['repository']).toBe('git+https://github.com/obsidiest/obsidian-nested-properties-advanced.git');
     expect(styleSource).toContain('id: nested-properties-advanced');
     expect(styleSource).toContain('id: np-active-tree-background-color');
@@ -47,7 +47,7 @@ describe('property field feature release quality', () => {
     const settingTabSource = readRepoFile('src/plugin-setting-tab.ts');
     const settingKeys = [...settingsSource.matchAll(/public (?<key>\w+) =/gu)].map((match) => match.groups?.['key']).filter((settingKey): settingKey is string => settingKey !== undefined);
 
-    expect(settingKeys).toHaveLength(52);
+    expect(settingKeys).toHaveLength(56);
     for (const settingKey of settingKeys) {
       expect(settingTabSource).toContain(`'${settingKey}'`);
     }

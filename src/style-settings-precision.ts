@@ -1,5 +1,9 @@
 /* v8 ignore file -- Runs against the separately installed Style Settings plugin's live settings DOM. */
 /* eslint-disable @typescript-eslint/method-signature-style, @typescript-eslint/no-confusing-void-expression, @typescript-eslint/no-unnecessary-condition, func-style, no-magic-numbers, no-restricted-syntax, perfectionist/sort-classes, perfectionist/sort-maps, perfectionist/sort-modules, prefer-named-capture-group, unicorn/consistent-boolean-name, unicorn/dom-node-dataset, unicorn/no-incorrect-query-selector, unicorn/prefer-modern-dom-apis, unicorn/prefer-spread -- Style Settings supplies an external, mutation-driven DOM whose controls must be enhanced in place while preserving its native events. */
+import type { StyleSettingsColorStore } from './style-settings-colors.ts';
+
+import { StyleSettingsColors } from './style-settings-colors.ts';
+
 const MARKER_SELECTOR = '[data-id^="np-"], [data-id^="nested-properties-advanced@@np-"], [data-id*="@@np-"]';
 const SECTION_SELECTOR = '.style-settings-heading[data-id="nested-properties-advanced"], .style-settings-heading[data-id$="@@nested-properties-advanced"]';
 const NUMBER_INPUT_CLASS = 'np-style-settings-number-input';
@@ -15,6 +19,17 @@ type QueryableNode = ParentNode & { matches?: (selector: string) => boolean };
 
 export class StyleSettingsPrecisionControls {
   private readonly observers = new Map<Document, MutationObserver>();
+  private readonly colors: StyleSettingsColors;
+
+  public constructor(getColors: () => null | StyleSettingsColorStore = () => null) {
+    this.colors = new StyleSettingsColors(getColors);
+  }
+
+  public refreshColors(): void {
+    for (const doc of this.observers.keys()) {
+      this.colors.enhance(doc);
+    }
+  }
 
   public start(documents?: Iterable<Document>): void {
     for (const ownerDocument of documents ?? (typeof document === 'undefined' ? [] : [document])) {
@@ -27,6 +42,9 @@ export class StyleSettingsPrecisionControls {
       return;
     }
     enhanceOpenStyleSettingsControls(ownerDocument);
+    if (hasOpenStyleSettingsSection(ownerDocument)) {
+      this.colors.enhance(ownerDocument);
+    }
     const Observer = ownerDocument.defaultView?.MutationObserver;
     if (Observer === undefined) {
       return;
@@ -38,8 +56,12 @@ export class StyleSettingsPrecisionControls {
       if (!hasOpenStyleSettingsSection(ownerDocument)) {
         return;
       }
-      for (const root of getStyleSettingsMutationRoots(mutations)) {
+      const roots = getStyleSettingsMutationRoots(mutations);
+      for (const root of roots) {
         enhanceStyleSettingsControls(root);
+      }
+      if (roots.length > 0) {
+        this.colors.enhance(ownerDocument);
       }
     });
     observer.observe(ownerDocument.body, { attributeFilter: ['data-id'], attributes: true, childList: true, subtree: true });
@@ -51,6 +73,13 @@ export class StyleSettingsPrecisionControls {
       observer.disconnect();
     }
     this.observers.clear();
+    this.colors.stop();
+  }
+
+  public removeDocument(doc: Document): void {
+    this.observers.get(doc)?.disconnect();
+    this.observers.delete(doc);
+    this.colors.removeDocument(doc);
   }
 }
 

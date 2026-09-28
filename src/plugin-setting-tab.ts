@@ -61,6 +61,12 @@ export class NestedPropertiesPluginSettingTab extends PluginSettingTab {
     const isRootThreadingOff = (): boolean => isThreadingOff() || !settings.isActiveRootLevelPropertyFieldTreeThreadingEnabled;
 
     return [
+      this.group('Property Content Rendering', [
+        this.toggle('isRichPropertyRenderingEnabled', 'Render LaTeX, SVG, and Markdown in Properties', 'Render property keys, text values, and hover breadcrumb labels. Original syntax remains available when editing.', ['rich properties', 'math SVG formatted property keys', 'render property breadcrumbs']),
+        this.toggle('isRichPropertyRenderingInLivePreviewEnabled', 'Property Content Rendering in Live Preview', 'Render inactive property fields and hover breadcrumbs in Live Preview.', ['live preview property math markdown svg'], () => !settings.isRichPropertyRenderingEnabled),
+        this.toggle('isRichPropertyRenderingInSourceModeEnabled', 'Property Content Rendering in Source Mode', 'Render property fields and hover breadcrumbs in Source mode. The selected property line keeps its editable YAML syntax.', ['source property math markdown svg'], () => !settings.isRichPropertyRenderingEnabled),
+        this.toggle('isRichPropertyRenderingInReadingModeEnabled', 'Property Content Rendering in Reading Mode', 'Render property fields and hover breadcrumbs in Reading mode.', ['reading property math markdown svg'], () => !settings.isRichPropertyRenderingEnabled)
+      ]),
       this.group('Main UI Toggle States', [
         this.toggle('isRememberLastUsedMainUiToggleStatesEnabled', 'Remember Last Used Main UI Toggle States', 'Remember the last per-note expansion states selected from the Properties header across Obsidian restarts.', ['persist properties header toggles', 'restore nested property ui state']),
         this.toggle('isRememberAllNestedPropertiesExpansionToggleStateEnabled', 'Remember All Nested Properties Expansion Toggle State', 'Remember whether each note last used Expand All or Collapse All for nested properties.', ['persist expand collapse all', 'restore nested tree expansion'], () => !settings.isRememberLastUsedMainUiToggleStatesEnabled),

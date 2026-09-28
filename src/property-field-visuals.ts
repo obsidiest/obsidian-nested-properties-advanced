@@ -15,6 +15,7 @@ import {
   Component,
   MarkdownView
 } from 'obsidian';
+import { invokeAsyncSafely } from 'obsidian-dev-utils/async';
 import { getAllDomWindows } from 'obsidian-dev-utils/obsidian/workspace';
 
 import {
@@ -36,11 +37,19 @@ import {
   type SourcePropertyFieldNode
 } from './property-field-tree.ts';
 import {
+  didHandleRichPropertyLink,
+  hasRichPropertySyntax,
+  isRichPropertyRenderingEnabled,
+  PropertyRenderScopeComponent,
+  renderRichPropertyContent
+} from './rich-property-content.ts';
+import {
   sourceFieldHighlightEffect,
   sourceFieldHighlightState
 } from './source-field-highlight.ts';
 import {
- findSourceMappingColon, getSourcePropertyKeyEnd
+  findSourceMappingColon,
+  getSourcePropertyKeyEnd
 } from './source-property-key.ts';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
@@ -88,6 +97,8 @@ interface DocumentState {
   popoverAnchorRect: DOMRect | null;
   popoverMode: ViewMode | null;
   popoverOwner: MarkdownView | null;
+  popoverResizeObserver: ResizeObserver | null;
+  popoverScope: PropertyRenderScopeComponent | null;
   renderedContainers: Set<HTMLElement>;
   renderedSourceViews: Set<HTMLElement>;
   renderFrame: number | null;
@@ -320,6 +331,8 @@ export class PropertyFieldVisualsComponent extends Component {
       popoverAnchorRect: null,
       popoverMode: null,
       popoverOwner: null,
+      popoverResizeObserver: null,
+      popoverScope: null,
       renderedContainers: new Set(),
       renderedSourceViews: new Set(),
       renderFrame: null,
@@ -738,6 +751,10 @@ export class PropertyFieldVisualsComponent extends Component {
       win.clearTimeout(state.hideTimer);
     }
     state.hideTimer = null;
+    state.popoverScope?.dispose();
+    state.popoverScope = null;
+    state.popoverResizeObserver?.disconnect();
+    state.popoverResizeObserver = null;
     state.popover?.remove();
     state.popover = null;
     state.popoverAnchorRect = null;
@@ -1387,7 +1404,14 @@ export class PropertyFieldVisualsComponent extends Component {
       return;
     }
     this.cancelPopoverHide(ownerDocument);
+    state.popoverScope?.dispose();
+    state.popoverResizeObserver?.disconnect();
+    state.popoverResizeObserver = null;
     state.popover?.remove();
+    const shouldRender = isRichPropertyRenderingEnabled(this.pluginSettingsComponent.settings, detectViewMode(anchor));
+    const contentScope = shouldRender ? new PropertyRenderScopeComponent(this) : null;
+    state.popoverScope = contentScope;
+    const sourcePath = this.findMarkdownView(ownerDocument, anchor)?.file?.path ?? '';
     const popover = ownerDocument.win.createDiv();
     popover.className = 'np-property-breadcrumb-popover';
     popover.setAttribute('role', 'dialog');
@@ -1405,10 +1429,23 @@ export class PropertyFieldVisualsComponent extends Component {
       row.setAttribute('role', 'treeitem');
       row.setAttribute('aria-current', entry.current ? 'true' : 'false');
       const button = row.createEl('button', { cls: 'np-property-breadcrumb-key', text: entry.node.key, type: 'button' });
+      if (contentScope !== null && hasRichPropertySyntax(entry.node.key)) {
+        button.textContent = '';
+        const label = button.createSpan({ cls: 'np-property-breadcrumb-label' });
+        invokeAsyncSafely(() =>
+          renderRichPropertyContent(this.app, entry.node.key, label, sourcePath, contentScope).then(() => {
+            if (!contentScope.isDisposed && state.popover === popover) {
+              refreshGeometry();
+            }
+          })
+        );
+      }
       button.addEventListener('click', (event) => {
         event.stopPropagation();
-        onNavigate(entry.node);
-      });
+        if (!didHandleRichPropertyLink(this.app, event, sourcePath)) {
+          onNavigate(entry.node);
+        }
+      }, { capture: true });
       button.addEventListener('mouseenter', () => {
         // Hover previews a field. Only an explicit click or keyboard activation
         // Transfers the caret; later pointer movement must not blur that editor.
@@ -1433,6 +1470,23 @@ export class PropertyFieldVisualsComponent extends Component {
     state.popoverOwner = this.findMarkdownView(ownerDocument, anchor);
     this.positionPopover(popover, state.popoverAnchorRect);
     this.drawBreadcrumbGuides(tree, entries, rowElements);
+    const refreshGeometry = (): void => {
+      if (state.popover !== popover || state.popoverAnchorRect === null) {
+        return;
+      }
+      for (const guide of tree.querySelectorAll(':scope > .np-property-breadcrumb-guides')) {
+        guide.remove();
+      }
+      this.positionPopover(popover, state.popoverAnchorRect);
+      this.drawBreadcrumbGuides(tree, entries, rowElements);
+    };
+    const ResizeObserverConstructor = ownerDocument.defaultView?.ResizeObserver;
+    if (contentScope !== null && ResizeObserverConstructor !== undefined) {
+      state.popoverResizeObserver = new ResizeObserverConstructor(refreshGeometry);
+      for (const row of rowElements) {
+        state.popoverResizeObserver.observe(row);
+      }
+    }
     const currentIndex = entries.findIndex((entry) => entry.current);
     const currentRow = rowElements[currentIndex];
     if (currentRow !== undefined) {

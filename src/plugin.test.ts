@@ -108,11 +108,17 @@ vi.mock('./property-field-visuals.ts', async () => ({
   PropertyFieldVisualsComponent: await loadableVisualsStub()
 }));
 
+vi.mock('./rich-property-rendering.ts', async () => ({
+  RichPropertyRenderingComponent: await loadableVisualsStub()
+}));
+
 vi.mock('./style-settings-precision.ts', () => ({
   // eslint-disable-next-line prefer-arrow-callback -- A non-arrow function so it is constructable via `new`.
   StyleSettingsPrecisionControls: vi.fn(function styleSettingsPrecisionControlsStub() {
     return {
       observeDocument: lifecycleMocks.observeDocument,
+      refreshColors: vi.fn(),
+      removeDocument: vi.fn(),
       start: lifecycleMocks.start,
       stop: lifecycleMocks.stop
     };

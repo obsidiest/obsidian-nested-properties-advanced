@@ -31,7 +31,9 @@
     "obsidiest",
     "obsidianmd",
     "offref",
+    "Pickr",
     "Promisable",
+    "retarget",
     "subkey",
     "subfeature",
     "subfeatures",
@@ -41,7 +43,8 @@
     "unsets",
     "unstub",
     "unvalidated",
-    "wdio"
+    "wdio",
+    "wikilink"
   ],
   "ignoreWords": [],
   "import": [],

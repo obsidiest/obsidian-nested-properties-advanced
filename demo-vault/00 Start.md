@@ -26,6 +26,8 @@ Welcome to the [Nested Properties Advanced](https://github.com/obsidiest/obsidia
 - [08 Full key display](<./08 Full key display.md>)
 - [11 Property field guides, breadcrumbs, and threading](<./11 Property field guides, breadcrumbs, and threading.md>)
 
+- [12 Rich property content](<./12 Rich property content.md>)
+
 ## Vault-wide operations
 
 - [09 Vault-wide rename and delete](<./09 Vault-wide rename and delete.md>)

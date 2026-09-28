@@ -78,7 +78,7 @@ describe('NestedPropertiesPluginSettingTab', () => {
     const controls = items.map((item) => item.control).filter((control): control is TestControl => control !== undefined);
 
     const settingsKeys = Object.entries(new PluginSettings()).filter(([, value]) => typeof value === 'boolean' || typeof value === 'number').map(([key]) => key);
-    expect(definitions).toHaveLength(6);
+    expect(definitions).toHaveLength(7);
     expect(new Set(controls.map((control) => control.key))).toEqual(new Set(settingsKeys));
     expect(definitions.map((definition) => definition.heading)).toContain('Hover Breadcrumb Popover Timeout');
     for (const mode of ['Live Preview', 'Source', 'Reading']) {

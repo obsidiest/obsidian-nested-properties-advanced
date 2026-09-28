@@ -52,6 +52,10 @@ export class PluginSettings {
   public isRememberAllNestedPropertiesExpansionToggleStateEnabled = true;
   public isRememberFullKeyNamesExpansionToggleStateEnabled = true;
   public isRememberLastUsedMainUiToggleStatesEnabled = true;
+  public isRichPropertyRenderingEnabled = true;
+  public isRichPropertyRenderingInLivePreviewEnabled = true;
+  public isRichPropertyRenderingInReadingModeEnabled = true;
+  public isRichPropertyRenderingInSourceModeEnabled = true;
   public livePreviewModeHoverBreadcrumbTimeoutSeconds = DEFAULT_HOVER_BREADCRUMB_TIMEOUT_SECONDS;
   public readingModeHoverBreadcrumbTimeoutSeconds = DEFAULT_HOVER_BREADCRUMB_TIMEOUT_SECONDS;
   public sourceModeHoverBreadcrumbTimeoutSeconds = DEFAULT_HOVER_BREADCRUMB_TIMEOUT_SECONDS;
