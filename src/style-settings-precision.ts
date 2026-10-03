@@ -1,5 +1,9 @@
 /* v8 ignore file -- Runs against the separately installed Style Settings plugin's live settings DOM. */
 /* eslint-disable @typescript-eslint/method-signature-style, @typescript-eslint/no-confusing-void-expression, @typescript-eslint/no-unnecessary-condition, func-style, no-magic-numbers, no-restricted-syntax, perfectionist/sort-classes, perfectionist/sort-maps, perfectionist/sort-modules, prefer-named-capture-group, unicorn/consistent-boolean-name, unicorn/dom-node-dataset, unicorn/no-incorrect-query-selector, unicorn/prefer-modern-dom-apis, unicorn/prefer-spread -- Style Settings supplies an external, mutation-driven DOM whose controls must be enhanced in place while preserving its native events. */
+import type { App } from 'obsidian';
+
+import { around } from 'obsidian-dev-utils/obsidian/components/monkey-around-component';
+
 import type { StyleSettingsColorStore } from './style-settings-colors.ts';
 
 import { StyleSettingsColors } from './style-settings-colors.ts';
@@ -16,10 +20,13 @@ const COLOR_DEFAULTS = new Map<string, string>([
 ]);
 
 type QueryableNode = ParentNode & { matches?: (selector: string) => boolean };
+type SettingsHost = Pick<App['setting'], 'activeTab' | 'openTab'>;
 
 export class StyleSettingsPrecisionControls {
   private readonly observers = new Map<Document, MutationObserver>();
+  private readonly documentCleanups = new Map<Document, () => void>();
   private readonly colors: StyleSettingsColors;
+  private settingsCleanup: (() => void) | null = null;
 
   public constructor(getColors: () => null | StyleSettingsColorStore = () => null) {
     this.colors = new StyleSettingsColors(getColors);
@@ -31,9 +38,26 @@ export class StyleSettingsPrecisionControls {
     }
   }
 
-  public start(documents?: Iterable<Document>): void {
+  public start(documents?: Iterable<Document>, settings?: SettingsHost): void {
     for (const ownerDocument of documents ?? (typeof document === 'undefined' ? [] : [document])) {
       this.observeDocument(ownerDocument);
+    }
+    if (settings !== undefined && typeof settings.openTab === 'function') {
+      this.settingsCleanup?.();
+      const observe = (doc: Document): void => this.observeDocument(doc);
+      // Obsidian 1.13's Settings popout is an auxiliary Modal window. It has no
+      // Workspace leaves and does not emit workspace window-open/window-close.
+      // OpenTab adopts the tab into its actual window before rendering it.
+      this.settingsCleanup = around(settings, {
+        openTab: (original) =>
+          function openSettingsTab(this: SettingsHost, tab): void {
+            original.call(this, tab);
+            observe(tab.containerEl.ownerDocument);
+          }
+      });
+      if (settings.activeTab?.containerEl.isConnected) {
+        this.observeDocument(settings.activeTab.containerEl.ownerDocument);
+      }
     }
   }
 
@@ -66,17 +90,24 @@ export class StyleSettingsPrecisionControls {
     });
     observer.observe(ownerDocument.body, { attributeFilter: ['data-id'], attributes: true, childList: true, subtree: true });
     this.observers.set(ownerDocument, observer);
+    const win = ownerDocument.defaultView;
+    const unload = (): void => this.removeDocument(ownerDocument);
+    win?.addEventListener('unload', unload, { once: true });
+    this.documentCleanups.set(ownerDocument, () => win?.removeEventListener('unload', unload));
   }
 
   public stop(): void {
-    for (const observer of this.observers.values()) {
-      observer.disconnect();
+    this.settingsCleanup?.();
+    this.settingsCleanup = null;
+    for (const doc of this.observers.keys()) {
+      this.removeDocument(doc);
     }
-    this.observers.clear();
     this.colors.stop();
   }
 
   public removeDocument(doc: Document): void {
+    this.documentCleanups.get(doc)?.();
+    this.documentCleanups.delete(doc);
     this.observers.get(doc)?.disconnect();
     this.observers.delete(doc);
     this.colors.removeDocument(doc);

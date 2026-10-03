@@ -2,6 +2,8 @@
 
 ## 2.1.0 (in development)
 
+- fix: enhance Style Settings color and precision controls in Obsidian 1.13 Settings windows, including window closure and plugin reload cleanup
+
 - feat: add before-timeout scroll previews and optional after-timeout breadcrumb navigation, adapted from List Tree Indentation Guides 2.0.2, with Escape cancellation and unchanged hover caret position
 - feat: rename the timeout section to Property Field Hover Breadcrumb Popover Timeout
 - fix: map Source key-only hover regions through CodeMirror when rich rendering changes the displayed text length

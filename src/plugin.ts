@@ -67,7 +67,7 @@ export class Plugin extends PluginBase {
 
     const styleSettingsPrecisionControls = new StyleSettingsPrecisionControls(() => styleSettingsColorStore(this.app));
     this.app.workspace.onLayoutReady(() => {
-      styleSettingsPrecisionControls.start([...getAllDomWindows(this.app)].map((win) => win.document));
+      styleSettingsPrecisionControls.start([...getAllDomWindows(this.app)].map((win) => win.document), this.app.setting);
     });
     this.registerEvent(this.app.workspace.on('window-open', (_workspaceWindow, openedWindow) => {
       styleSettingsPrecisionControls.observeDocument(openedWindow.document);

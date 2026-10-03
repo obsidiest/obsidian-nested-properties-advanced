@@ -878,7 +878,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         }
         const doc = source.ownerDocument;
         const focusBeforeUndo = doc.activeElement?.className;
-        const scrollTop = scroller.scrollTop;
+        let scrollTop = scroller.scrollTop;
         let maximumScrollDelta = 0;
         function measureScroll(): void {
           maximumScrollDelta = Math.max(maximumScrollDelta, Math.abs(activeScroller.scrollTop - scrollTop));
@@ -889,6 +889,10 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         await new Promise<void>((resolve) => {
           doc.defaultView?.setTimeout(resolve, 2500);
         });
+        measureScroll();
+        scroller.removeEventListener('scroll', measureScroll);
+        // Hover navigation now deliberately scrolls the note. Check history against
+        // The position before undo and the completed preview position before redo.
         if (focusTarget === 'breadcrumb') {
           const restored = [...source.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((candidate) => candidate.value === keyName);
           if (restored === undefined) {
@@ -907,6 +911,8 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
             doc.defaultView?.setTimeout(resolve, 180);
           });
         }
+        scrollTop = scroller.scrollTop;
+        scroller.addEventListener('scroll', measureScroll);
         const focusBeforeRedo = doc.activeElement?.className;
         pressKey({ key: 'y', modifiers: ['Ctrl'] });
         await new Promise<void>((resolve) => {

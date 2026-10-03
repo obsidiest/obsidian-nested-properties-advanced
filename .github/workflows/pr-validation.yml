@@ -41,6 +41,14 @@ jobs:
       - name: Build the plugin
         run: npm run build
 
+      - name: Check color dialogs on Linux before the full suite
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npx vitest run --project integration-tests:desktop src/style-settings-colors.desktop.integration.test.ts
+
+      - name: Check color dialogs on Windows before the full suite
+        if: runner.os == 'Windows'
+        run: npx vitest run --project integration-tests:desktop src/style-settings-colors.desktop.integration.test.ts
+
       - name: Run desktop integration tests on Linux
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run test:integration:desktop

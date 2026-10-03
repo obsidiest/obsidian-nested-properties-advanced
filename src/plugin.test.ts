@@ -42,6 +42,7 @@ vi.mock('obsidian-dev-utils/obsidian/workspace', async (importOriginal) => ({
 
 interface AppWithPlugins {
   plugins: unknown;
+  setting: unknown;
 }
 
 // `NestedPropertyRendererComponent` is added via `addChild`, which eager-loads it, so its stub must be
@@ -202,6 +203,7 @@ describe('Plugin', () => {
     vi.clearAllMocks();
     lifecycleMocks.documents.splice(0, lifecycleMocks.documents.length, castTo<Document>({ id: 'main-document' }));
     const appMock = App.createConfigured__();
+    castTo<AppWithPlugins>(appMock).setting = { activeTab: null, openTab: vi.fn() };
     castTo<AppWithPlugins>(appMock).plugins = { getPlugin: vi.fn(() => null) };
     appMock.workspace.onLayoutReady = vi.fn((callback: () => void) => {
       callback();
@@ -348,7 +350,7 @@ describe('Plugin', () => {
       const workspaceOnSpy = vi.spyOn(app.workspace, 'on');
       await plugin.onload();
 
-      expect(lifecycleMocks.start).toHaveBeenCalledWith(lifecycleMocks.documents);
+      expect(lifecycleMocks.start).toHaveBeenCalledWith(lifecycleMocks.documents, app.setting);
       const settingTab = castTo<SettingTabWithCallback>(addSettingTabSpy.mock.calls[0]?.[0]);
       settingTab.onSettingsChanged('isPropertyFieldHoverBreadcrumbEnabled', true);
       const renderer = castTo<RendererWithToggle>(instanceOf(MockNestedPropertyRendererComponent));
