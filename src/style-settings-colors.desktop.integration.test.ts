@@ -103,7 +103,7 @@ describe('color dialogs with released Style Settings 1.0.9 in Obsidian', () => {
                 JSON.stringify({
                   documentMoved: doc !== tab.containerEl.ownerDocument,
                   guide: guide?.outerHTML,
-                  headings: [...tab.containerEl.querySelectorAll<HTMLElement>('.style-settings-heading')].map((heading) => ({ classes: heading.className, id: heading.dataset.id })),
+                  headings: [...tab.containerEl.querySelectorAll<HTMLElement>('.style-settings-heading')].map((heading) => ({ classes: heading.className, id: heading.dataset['id'] })),
                   isMainDocument: doc === app.workspace.rootSplit.doc,
                   managerGet: typeof plugin?.settingsManager?.getSetting,
                   managerSet: typeof plugin?.settingsManager?.setSettings,
