@@ -42,6 +42,8 @@ export class PluginSettings {
   public isPropertyFieldHoverBreadcrumbInLivePreviewEnabled = true;
   public isPropertyFieldHoverBreadcrumbInReadingModeEnabled = true;
   public isPropertyFieldHoverBreadcrumbInSourceModeEnabled = true;
+  public isPropertyFieldHoverBreadcrumbNavigateAfterTimeoutEnabled = false;
+  public isPropertyFieldHoverBreadcrumbNavigateBeforeTimeoutEnabled = true;
   public isPropertyFieldHoverBreadcrumbStaticTreeIndentationGuidesEnabled = true;
   public isPropertyFieldThreadingEnabled = false;
   public isPropertyFieldThreadingInHoverBreadcrumbEnabled = false;

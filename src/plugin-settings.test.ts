@@ -37,6 +37,8 @@ describe('PluginSettings', () => {
       isPropertyFieldHoverBreadcrumbInLivePreviewEnabled: true,
       isPropertyFieldHoverBreadcrumbInReadingModeEnabled: true,
       isPropertyFieldHoverBreadcrumbInSourceModeEnabled: true,
+      isPropertyFieldHoverBreadcrumbNavigateAfterTimeoutEnabled: false,
+      isPropertyFieldHoverBreadcrumbNavigateBeforeTimeoutEnabled: true,
       isPropertyFieldHoverBreadcrumbStaticTreeIndentationGuidesEnabled: true,
       isPropertyFieldThreadingEnabled: false,
       isPropertyFieldThreadingInHoverBreadcrumbEnabled: false,

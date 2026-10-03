@@ -83,6 +83,17 @@ interface BreadcrumbEntry<T> {
   parentIndex: number;
 }
 
+interface BreadcrumbNavigation<T> {
+  captureScroll(): () => void;
+  isValid(): boolean;
+  navigate(node: T, select: boolean): void;
+}
+
+interface PopoverNavigation {
+  dismiss(timedOut: boolean): void;
+  isValid(): boolean;
+}
+
 interface DocumentState {
   active: ActiveField | null;
   bodyStyleObserver: MutationObserver | null;
@@ -96,6 +107,7 @@ interface DocumentState {
   popover: HTMLElement | null;
   popoverAnchorRect: DOMRect | null;
   popoverMode: ViewMode | null;
+  popoverNavigation: PopoverNavigation | null;
   popoverOwner: MarkdownView | null;
   popoverResizeObserver: ResizeObserver | null;
   popoverScope: PropertyRenderScopeComponent | null;
@@ -330,6 +342,7 @@ export class PropertyFieldVisualsComponent extends Component {
       popover: null,
       popoverAnchorRect: null,
       popoverMode: null,
+      popoverNavigation: null,
       popoverOwner: null,
       popoverResizeObserver: null,
       popoverScope: null,
@@ -489,6 +502,11 @@ export class PropertyFieldVisualsComponent extends Component {
       hideSourceViewOverlay(sourceView);
     }
     if (update.docChanged) {
+      const state = this.documentStates.get(update.view.dom.ownerDocument);
+      if (state?.popoverNavigation !== null && state?.popoverNavigation !== undefined && !state.popoverNavigation.isValid()) {
+        // A stale document cannot safely receive a deferred scroll or restoration.
+        this.dismissPopover(state);
+      }
       const isPropertyHistory = sourceView?.classList.contains('is-live-preview') === true
         && update.transactions.some((transaction) => transaction.isUserEvent('undo') || transaction.isUserEvent('redo'))
         && update.transactions.every(isFrontmatterOnlyChange);
@@ -744,7 +762,9 @@ export class PropertyFieldVisualsComponent extends Component {
     this.scheduleRender(ownerDocument);
   }
 
-  private dismissPopover(state: DocumentState): void {
+  private dismissPopover(state: DocumentState, timedOut = false): void {
+    const navigation = state.popoverNavigation;
+    state.popoverNavigation = null;
     const ownerDocument = state.popover?.ownerDocument;
     const win = state.popover?.ownerDocument.defaultView;
     if (state.hideTimer !== null && win !== null && win !== undefined) {
@@ -765,6 +785,8 @@ export class PropertyFieldVisualsComponent extends Component {
         element.classList.remove('np-property-field-popover-highlight');
       }
     }
+    // Remove the popup before scrolling: CodeMirror can synchronously update here.
+    navigation?.dismiss(timedOut);
   }
 
   private updateDomPointerActivation(ownerDocument: Document, state: DocumentState, metadataContainer: HTMLElement, breadcrumbElement: HTMLElement | null, threadingElement: HTMLElement | null): void {
@@ -897,6 +919,16 @@ export class PropertyFieldVisualsComponent extends Component {
   }
 
   private onKeyDown(ownerDocument: Document, event: KeyboardEvent): void {
+    const popoverState = this.documentStates.get(ownerDocument);
+    if (event.key === 'Escape' && popoverState?.popover !== null && popoverState?.popover !== undefined) {
+      if (popoverState.popover.contains(getDomNode(event.target))) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      popoverState.hoveredBreadcrumbField = null;
+      this.dismissPopover(popoverState);
+      return;
+    }
     const isRedo = isRedoShortcut(event);
     const isUndo = isUndoShortcut(event);
     if (!isRedo && !isUndo) {
@@ -1055,6 +1087,9 @@ export class PropertyFieldVisualsComponent extends Component {
   }
 
   private reconcileVisualState(ownerDocument: Document, state: DocumentState, shownContainers: HTMLElement[], shownSourceViews: HTMLElement[]): void {
+    if (state.popoverNavigation !== null && !state.popoverNavigation.isValid()) {
+      this.dismissPopover(state);
+    }
     const active = state.active;
     let isActiveValid = true;
     if (active?.kind === 'dom') {
@@ -1356,9 +1391,19 @@ export class PropertyFieldVisualsComponent extends Component {
       ? flattenPropertyFieldForest([root])
       : getPropertyFieldAncestors(current);
     const entries = createBreadcrumbEntries(nodes, current);
-    this.showBreadcrumb(ownerDocument, entries, anchor, (node) => {
-      node.keyElement.scrollIntoView({ block: 'center', inline: 'nearest' });
-      focusPropertyKeyEnd(node.keyElement);
+    const container = anchor.closest<HTMLElement>(METADATA_CONTAINER_SELECTOR) ?? anchor;
+    const mode = detectViewMode(anchor);
+    const codeMirrorView = this.findCodeMirrorView(container);
+    const source = codeMirrorView?.state.doc;
+    this.showBreadcrumb(ownerDocument, entries, anchor, {
+      captureScroll: () => captureElementScroll(container),
+      isValid: () => container.isConnected && container.ownerDocument === ownerDocument && detectViewMode(container) === mode && codeMirrorView?.state.doc === source && nodes.every((node) => node.keyElement.isConnected),
+      navigate: (node, select) => {
+        node.keyElement.scrollIntoView({ block: 'center', inline: 'nearest' });
+        if (select) {
+          focusPropertyKeyEnd(node.keyElement);
+        }
+      }
     }, (node) => {
       for (const element of ownerDocument.querySelectorAll('.np-property-field-popover-highlight')) {
         element.classList.remove('np-property-field-popover-highlight');
@@ -1366,9 +1411,9 @@ export class PropertyFieldVisualsComponent extends Component {
       node.keyElement.classList.add('np-property-field-popover-highlight');
       if (!settings.isActiveCursorPropertyFieldThreadingEnabled && this.isMainThreadingEnabled(detectViewMode(node.element))) {
         const state = this.documentStates.get(ownerDocument);
-        const container = node.element.closest<HTMLElement>('.metadata-container');
-        if (state !== undefined && container !== null) {
-          state.active = { container, element: node.element, kind: 'dom' };
+        const nodeContainer = node.element.closest<HTMLElement>('.metadata-container');
+        if (state !== undefined && nodeContainer !== null) {
+          state.active = { container: nodeContainer, element: node.element, kind: 'dom' };
           this.scheduleRender(ownerDocument);
         }
       }
@@ -1384,9 +1429,27 @@ export class PropertyFieldVisualsComponent extends Component {
       : isBreadcrumbThreadingEnabled && settings.isAllBranchesOfActivePropertyFieldTreeThreadingEnabled && settings.isAllBranchesOfActivePropertyFieldTreeThreadingInHoverBreadcrumbEnabled
       ? flattenPropertyFieldForest([root])
       : getPropertyFieldAncestors(current);
-    this.showBreadcrumb(ownerDocument, createBreadcrumbEntries(nodes, current), anchor, (node) => {
-      view.editor.setCursor({ ch: getSourcePropertyKeyEnd(view.editor.getLine(node.line), node.column), line: node.line });
-      view.editor.focus();
+    const sourceView = anchor.closest<HTMLElement>('.markdown-source-view') ?? view.containerEl;
+    const codeMirrorView = this.findCodeMirrorView(sourceView);
+    const source = codeMirrorView?.state.doc;
+    this.showBreadcrumb(ownerDocument, createBreadcrumbEntries(nodes, current), anchor, {
+      captureScroll: () => {
+        if (codeMirrorView === null) {
+          return captureElementScroll(sourceView);
+        }
+        const snapshot = codeMirrorView.scrollSnapshot();
+        return (): void => codeMirrorView.dispatch({ effects: snapshot });
+      },
+      isValid: () => sourceView.isConnected && sourceView.ownerDocument === ownerDocument && detectViewMode(sourceView) === 'source' && codeMirrorView?.state.doc === source,
+      navigate: (node, select) => {
+        if (select) {
+          view.editor.setCursor({ ch: getSourcePropertyKeyEnd(view.editor.getLine(node.line), node.column), line: node.line });
+          view.editor.focus();
+        }
+        if (codeMirrorView !== null && node.line < codeMirrorView.state.doc.lines) {
+          codeMirrorView.dispatch({ effects: EditorView.scrollIntoView(codeMirrorView.state.doc.line(node.line + 1).from, { y: 'center' }) });
+        }
+      }
     }, (node) => {
       if (!settings.isActiveCursorPropertyFieldThreadingEnabled && this.isMainThreadingEnabled('source')) {
         const state = this.documentStates.get(ownerDocument);
@@ -1398,21 +1461,52 @@ export class PropertyFieldVisualsComponent extends Component {
     });
   }
 
-  private showBreadcrumb<T extends { children: T[]; depth: number; key: string; parent: null | T }>(ownerDocument: Document, entries: Array<BreadcrumbEntry<T>>, anchor: HTMLElement, onNavigate: (node: T) => void, onHighlight: (node: T) => void): void {
+  private showBreadcrumb<T extends { children: T[]; depth: number; key: string; parent: null | T }>(ownerDocument: Document, entries: Array<BreadcrumbEntry<T>>, anchor: HTMLElement, navigation: BreadcrumbNavigation<T>, onHighlight: (node: T) => void): void {
     const state = this.documentStates.get(ownerDocument);
     if (state === undefined) {
       return;
     }
-    this.cancelPopoverHide(ownerDocument);
-    state.popoverScope?.dispose();
-    state.popoverResizeObserver?.disconnect();
-    state.popoverResizeObserver = null;
-    state.popover?.remove();
+    this.dismissPopover(state);
     const shouldRender = isRichPropertyRenderingEnabled(this.pluginSettingsComponent.settings, detectViewMode(anchor));
     const contentScope = shouldRender ? new PropertyRenderScopeComponent(this) : null;
     state.popoverScope = contentScope;
     const sourcePath = this.findMarkdownView(ownerDocument, anchor)?.file?.path ?? '';
     const popover = ownerDocument.win.createDiv();
+    // Adapted from List Tree Indentation Guides 2.0.2, src/list-breadcrumb.ts (MIT).
+    let hovered: null | T = null;
+    let restore: (() => void) | null = null;
+    const activate = (node: T, select = false): void => {
+      if (state.popover !== popover || !navigation.isValid()) {
+        return;
+      }
+      hovered = select ? null : node;
+      if (select) {
+        restore = null;
+      }
+      if (select || this.pluginSettingsComponent.settings.isPropertyFieldHoverBreadcrumbNavigateBeforeTimeoutEnabled) {
+        if (!select) {
+          restore ??= navigation.captureScroll();
+        }
+        // The original Source line may leave CodeMirror's viewport during preview.
+        // The session now follows its note and document, not that recycled DOM line.
+        state.hoveredBreadcrumbField = null;
+        navigation.navigate(node, select);
+      }
+      onHighlight(node);
+    };
+    state.popoverNavigation = {
+      dismiss: (timedOut): void => {
+        if (!navigation.isValid()) {
+          return;
+        }
+        if (timedOut && this.pluginSettingsComponent.settings.isPropertyFieldHoverBreadcrumbNavigateAfterTimeoutEnabled && hovered !== null) {
+          navigation.navigate(hovered, false);
+        } else {
+          restore?.();
+        }
+      },
+      isValid: (): boolean => navigation.isValid()
+    };
     popover.className = 'np-property-breadcrumb-popover';
     popover.setAttribute('role', 'dialog');
     popover.setAttribute('aria-label', 'Property field hierarchy');
@@ -1442,16 +1536,18 @@ export class PropertyFieldVisualsComponent extends Component {
       }
       button.addEventListener('click', (event) => {
         event.stopPropagation();
-        if (!didHandleRichPropertyLink(this.app, event, sourcePath)) {
-          onNavigate(entry.node);
+        if (didHandleRichPropertyLink(this.app, event, sourcePath)) {
+          this.dismissPopover(state);
+        } else {
+          activate(entry.node, true);
         }
       }, { capture: true });
       button.addEventListener('mouseenter', () => {
         // Hover previews a field. Only an explicit click or keyboard activation
         // Transfers the caret; later pointer movement must not blur that editor.
-        onHighlight(entry.node);
+        activate(entry.node);
       });
-      button.addEventListener('focus', () => onHighlight(entry.node));
+      button.addEventListener('focus', () => activate(entry.node));
       rowElements.push(row);
     }
     tree.addEventListener('keydown', (event) => {
@@ -1605,11 +1701,11 @@ export class PropertyFieldVisualsComponent extends Component {
     }
     const timeout = getHoverBreadcrumbTimeoutMilliseconds(this.pluginSettingsComponent.settings, state.popoverMode ?? 'live-preview');
     if (timeout === 0) {
-      this.dismissPopover(state);
+      this.dismissPopover(state, true);
       return;
     }
     state.hideTimer = win.setTimeout(() => {
-      this.dismissPopover(state);
+      this.dismissPopover(state, true);
     }, timeout);
   }
 
@@ -1744,6 +1840,23 @@ export class PropertyFieldVisualsComponent extends Component {
       this.highlightSourceLine(ownerDocument, sourceLine);
     }
   }
+}
+
+function captureElementScroll(host: HTMLElement): () => void {
+  const positions = new Map<HTMLElement, { left: number; top: number }>();
+  for (let element: HTMLElement | null = host; element !== null; element = getHtmlElement(element.parentElement)) {
+    positions.set(element, { left: element.scrollLeft, top: element.scrollTop });
+  }
+  return () => {
+    for (const [element, position] of positions) {
+      if (!element.isConnected) {
+        continue;
+      }
+
+      element.scrollTop = position.top;
+      element.scrollLeft = position.left;
+    }
+  };
 }
 
 export function buildRoundedPath(params: { endX: number; endY: number; radius: number; startX: number; startY: number }): string {
@@ -2234,7 +2347,7 @@ export function isPointerBetweenPopoverAndAnchor(anchor: Pick<DOMRect, 'bottom' 
   return x >= from.left + (to.left - from.left) * fraction && x <= from.right + (to.right - from.right) * fraction;
 }
 
-export function getSourceKeyActivationRects(view: Pick<EditorView, 'coordsAtPos' | 'defaultLineHeight' | 'state'>, lineElement: HTMLElement, documentLine: number): Array<Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>> {
+export function getSourceKeyActivationRects(view: Partial<Pick<EditorView, 'domAtPos'>> & Pick<EditorView, 'coordsAtPos' | 'defaultLineHeight' | 'state'>, lineElement: HTMLElement, documentLine: number): Array<Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>> {
   const lineRect = lineElement.getBoundingClientRect();
   let text: string;
   let lineFrom: number;
@@ -2249,7 +2362,7 @@ export function getSourceKeyActivationRects(view: Pick<EditorView, 'coordsAtPos'
   if (characterRange === null) {
     return [];
   }
-  const range = createTextRange(lineElement, characterRange.start, characterRange.end);
+  const range = createSourceKeyRange(view, lineElement, lineFrom, characterRange.start, characterRange.end);
   const rects = range === null || typeof range.getClientRects !== 'function' ? [] : Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
   if (rects.length > 0) {
     return rects.map((rect) => {
@@ -2278,6 +2391,28 @@ export function getSourceKeyActivationRects(view: Pick<EditorView, 'coordsAtPos'
   return Number.isFinite(keyRight) && keyRight > lineRect.left
     ? [{ bottom: lineRect.bottom, left: lineRect.left, right: keyRight, top: lineRect.top }]
     : [];
+}
+
+function createSourceKeyRange(view: Partial<Pick<EditorView, 'domAtPos'>>, lineElement: HTMLElement, lineFrom: number, start: number, end: number): Range | null {
+  if (view.domAtPos === undefined) {
+    return createTextRange(lineElement, start, end);
+  }
+  try {
+    // Rendered widgets do not contain the same text as the document. Let
+    // CodeMirror map YAML positions into their actual displayed DOM range.
+    const startPosition = view.domAtPos(lineFrom + start);
+    const endPosition = view.domAtPos(lineFrom + end);
+    if (!lineElement.contains(startPosition.node) || !lineElement.contains(endPosition.node)) {
+      return null;
+    }
+    const range = lineElement.ownerDocument.createRange();
+    range.setStart(startPosition.node, startPosition.offset);
+    range.setEnd(endPosition.node, endPosition.offset);
+    return range;
+  } catch {
+    // The viewport can change between the pointer event and this measurement.
+    return null;
+  }
 }
 
 function getSourceFoldToggleActivationRects(sourceView: HTMLElement, lineRect: Pick<DOMRect, 'bottom' | 'top'>): Array<Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>> {

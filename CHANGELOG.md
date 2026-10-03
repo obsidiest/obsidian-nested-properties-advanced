@@ -2,6 +2,10 @@
 
 ## 2.1.0 (in development)
 
+- feat: add before-timeout scroll previews and optional after-timeout breadcrumb navigation, adapted from List Tree Indentation Guides 2.0.2, with Escape cancellation and unchanged hover caret position
+- feat: rename the timeout section to Property Field Hover Breadcrumb Popover Timeout
+- fix: map Source key-only hover regions through CodeMirror when rich rendering changes the displayed text length
+
 - feat: render LaTeX, SVG, Markdown formatting and links in property keys, text values, and hover breadcrumbs through Obsidian's renderer
 - feat: add default-enabled global and Live Preview, Source, and Reading property rendering controls
 - feat: preserve native property editing and source YAML while showing rendered content outside the focused field/selected Source line

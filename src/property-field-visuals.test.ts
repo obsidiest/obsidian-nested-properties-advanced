@@ -417,6 +417,40 @@ describe('property field visual render guards', () => {
     line.remove();
   });
 
+  it('should map Source key document positions through rendered widgets without including the value', () => {
+    const line = document.body.createDiv({ cls: 'cm-line' });
+    line.createSpan({ cls: 'np-rich-source-property', text: 'Key' });
+    const tail = document.createTextNode(': value');
+    line.append(tail);
+    const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+    Object.defineProperty(Range.prototype, 'getClientRects', {
+      configurable: true,
+      value(this: Range): DOMRect[] {
+        return [new DOMRect(100, 22, this.toString().includes('value') ? 200 : 70, 16)];
+      }
+    });
+    vi.spyOn(line, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 20, 300, 20));
+    const state = EditorState.create({ doc: '---\n"**Key**": value\n---' });
+    const view = {
+      coordsAtPos: (): Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'> => ({ bottom: 40, left: 170, right: 170, top: 20 }),
+      defaultLineHeight: 20,
+      domAtPos: (position: number): ReturnType<EditorView['domAtPos']> => position === state.doc.line(2).from ? { node: line, offset: 0 } : { node: tail, offset: 1 },
+      state
+    };
+    try {
+      const region = { field: line.getBoundingClientRect(), key: null, keyFragments: getSourceKeyActivationRects(view, line, 1), toggles: [] };
+      expect(isPointerWithinActivationRegion(region, 'key', 150, 30)).toBe(true);
+      expect(isPointerWithinActivationRegion(region, 'key', 250, 30)).toBe(false);
+    } finally {
+      if (originalRects === undefined) {
+        Reflect.deleteProperty(Range.prototype, 'getClientRects');
+      } else {
+        Object.defineProperty(Range.prototype, 'getClientRects', originalRects);
+      }
+      line.remove();
+    }
+  });
+
   it('should resolve a rendered property from its key, value, or blank row width', () => {
     const container = document.body.createDiv({ cls: 'metadata-container' });
     const property = container.createDiv({ cls: 'metadata-property' });

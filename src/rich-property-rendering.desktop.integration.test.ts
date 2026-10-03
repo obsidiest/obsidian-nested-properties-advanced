@@ -96,8 +96,10 @@ describe('rich properties through Obsidian MarkdownRenderer', () => {
           predicate: () => root.querySelector(`:scope ${labelSelector} mjx-container`) !== null && root.querySelector(`:scope ${labelSelector} svg path`) !== null && root.querySelector(`:scope ${labelSelector} a.internal-link`) !== null && root.querySelector(`:scope ${labelSelector} strong`) !== null
         });
         const valueSvg = modeName === 'source' ? root.querySelectorAll(`${labelSelector} svg path`).length : root.querySelectorAll(`.metadata-property-value ${labelSelector} svg path`).length;
-        const anchor = modeName === 'source' ? root.querySelector<HTMLElement>('.np-rich-source-property') : root.querySelector<HTMLElement>('.metadata-property-icon');
-        if (anchor === null) {
+        // Default breadcrumbs show ancestors. Hover the deepest key so the
+        // Math and SVG parents are both part of the expected hierarchy.
+        const anchor = root.querySelector(`${labelSelector} a.internal-link`)?.closest<HTMLElement>(labelSelector);
+        if (anchor === null || anchor === undefined) {
           throw new Error('Breadcrumb hover anchor missing');
         }
         await hoverElement({ element: anchor });
@@ -119,6 +121,34 @@ describe('rich properties through Obsidian MarkdownRenderer', () => {
     });
     expect(result.valueSvg).toBeGreaterThan(0);
     expect(result.unchanged).toBe(true);
+  });
+
+  it('keeps rendered Source key-only activation outside the rendered value', async () => {
+    const isResult = await evalInObsidian({
+      callback: async ({ context: { markdownView, tab }, lib: { hoverElement, waitUntil } }) => {
+        await markdownView.leaf.setViewState({ state: { file: 'rich-properties.md', mode: 'source', source: true }, type: 'markdown' });
+        markdownView.editor.setCursor({ ch: 0, line: 9 });
+        await tab.setControlValue('isFullWidthPropertyFieldHoverActivationEnabled', false);
+        await tab.setControlValue('isFullWidthPropertyKeyHoverActivationEnabled', true);
+        await tab.setControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds', 0.01);
+        const root = markdownView.containerEl;
+        const doc = root.ownerDocument;
+        await waitUntil({ predicate: () => root.querySelector(':scope .np-rich-source-property strong') !== null });
+        const key = root.querySelector(':scope .np-rich-source-property a.internal-link')?.closest<HTMLElement>('.np-rich-source-property');
+        const value = root.querySelector(':scope .np-rich-source-property strong')?.closest<HTMLElement>('.np-rich-source-property');
+        if (!key || !value) {
+          throw new Error('Rendered Source key/value missing');
+        }
+        await hoverElement({ element: key });
+        await waitUntil({ message: 'Rendered Source key did not activate breadcrumb', predicate: () => doc.querySelector('.np-property-breadcrumb-popover') !== null });
+        await hoverElement({ element: value });
+        await waitUntil({ message: 'Rendered Source value wrongly retained key-only breadcrumb', predicate: () => doc.querySelector('.np-property-breadcrumb-popover') === null });
+        return true;
+      },
+      contextId,
+      vaultPath: vault.path
+    });
+    expect(isResult).toBe(true);
   });
 
   it.each(['live-preview', 'source'])('keeps a single rendered breadcrumb click at the original key end in %s', async (mode) => {

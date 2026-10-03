@@ -88,9 +88,12 @@ export class NestedPropertiesPluginSettingTab extends PluginSettingTab {
         this.toggle('isFullPropertyFieldNameExpansionInHoverBreadcrumbEnabled', 'Full Property Field Name Expansion in a Property Field Hover Breadcrumb', 'Wrap long property field names onto additional lines so the complete name remains visible inside the breadcrumb.', ['wrap long breadcrumb names', 'complete property names in popover', 'multiline breadcrumb fields'], isBreadcrumbOff),
         this.subheading('Property Field Hover Breadcrumb Activation Scope', 'Choose full-field, full-key, or icon activation. In Source mode, the fold-gutter area beside every property also activates the breadcrumb, including leaves without an expansion toggle.'),
         this.toggle('isFullWidthPropertyFieldHoverActivationEnabled', 'Full-Width Property Field Hover Activation', 'Activate the breadcrumb anywhere across the full property row, including its key and value. This scope takes priority over the key-only scope.', ['whole property row breadcrumb', 'key and value hover popover', 'full field activation'], isBreadcrumbOff),
-        this.toggle('isFullWidthPropertyKeyHoverActivationEnabled', 'Full-Width Property Key Hover Activation', 'Activate the breadcrumb across the property key and its icon. Source-mode fold gutters activate with either scope enabled or with both off, including beside leaf properties.', ['property key hover popover', 'key width breadcrumb', 'icon fallback activation', 'leaf property gutter'], isBreadcrumbOff)
+        this.toggle('isFullWidthPropertyKeyHoverActivationEnabled', 'Full-Width Property Key Hover Activation', 'Activate the breadcrumb across the property key and its icon. Source-mode fold gutters activate with either scope enabled or with both off, including beside leaf properties.', ['property key hover popover', 'key width breadcrumb', 'icon fallback activation', 'leaf property gutter'], isBreadcrumbOff),
+        this.subheading('Property Field Hover Breadcrumb Navigation', 'Control when hovering or keyboard-focusing a breadcrumb scrolls the corresponding property field into view.'),
+        this.toggle('isPropertyFieldHoverBreadcrumbNavigateBeforeTimeoutEnabled', 'Hover Over a Given Breadcrumb Property Field to Change the Screen Focus to the Corresponding Property Field in the Main UI Before the Breadcrumb Popover Timeout', 'Preview hovered or keyboard-focused fields without moving the editor caret. Restore the previous scroll position when the popover closes unless navigation after timeout is enabled. Clicking always commits navigation.', ['breadcrumb navigation before timeout', 'preview property scroll position'], isBreadcrumbOff),
+        this.toggle('isPropertyFieldHoverBreadcrumbNavigateAfterTimeoutEnabled', 'Hover Over a Given Breadcrumb Property Field to Change the Screen Focus to the Corresponding Property Field in the Main UI After the Breadcrumb Popover Timeout', 'Keep or apply the last hovered field when the dismissal timer expires. Escape cancels deferred navigation and restores any preview.', ['breadcrumb navigation after timeout', 'deferred property scroll position'], isBreadcrumbOff)
       ]),
-      this.group('Hover Breadcrumb Popover Timeout', [
+      this.group('Property Field Hover Breadcrumb Popover Timeout', [
         this.toggle('isGloballyControlHoverBreadcrumbTimeoutEnabled', 'Globally Control Hover Breadcrumb Timeout', 'Use the global timeout in every viewing mode unless that mode has its individual control enabled. With neither control enabled, the default is 0.01 seconds.', ['global breadcrumb delay', 'popover dismissal timing'], isBreadcrumbOff),
         this.timeout('globalHoverBreadcrumbPopoverTimeoutSeconds', 'Global Hover Breadcrumb Popover Timeout', 'Seconds after leaving the active field or popover. Entering the popover cancels dismissal. Decimals are supported; 0 closes immediately.', ['global hover timeout seconds', 'breadcrumb navigation grace period'], () => isBreadcrumbOff() || !settings.isGloballyControlHoverBreadcrumbTimeoutEnabled),
         this.toggle('isControlLivePreviewModeHoverBreadcrumbTimeoutIndividuallyEnabled', 'Control Live Preview Mode Hover Breadcrumb Timeout Individually', 'Override the global timeout for Live Preview, even while global control is enabled.', ['live preview breadcrumb timeout override'], isBreadcrumbOff),
@@ -172,7 +175,7 @@ export class NestedPropertiesPluginSettingTab extends PluginSettingTab {
 
   private subheading(name: string, desc: string): SettingGroupItem<SettingsKey> {
     return {
-      aliases: ['breadcrumb activation scope', 'hover activation width'],
+      aliases: [name.toLowerCase()],
       desc,
       name,
       render: (setting): void => {

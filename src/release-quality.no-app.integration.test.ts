@@ -47,7 +47,7 @@ describe('property field feature release quality', () => {
     const settingTabSource = readRepoFile('src/plugin-setting-tab.ts');
     const settingKeys = [...settingsSource.matchAll(/public (?<key>\w+) =/gu)].map((match) => match.groups?.['key']).filter((settingKey): settingKey is string => settingKey !== undefined);
 
-    expect(settingKeys).toHaveLength(56);
+    expect(settingKeys).toHaveLength(58);
     for (const settingKey of settingKeys) {
       expect(settingTabSource).toContain(`'${settingKey}'`);
     }
