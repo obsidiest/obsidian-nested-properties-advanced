@@ -1406,9 +1406,21 @@ settings:
   overflow-wrap: anywhere;
   cursor: text;
 }
+.metadata-property-key:has(> .np-rich-property-label:not([hidden])) {
+  // Keep fixed-height property icons centered beside taller SVGs and wrapped labels.
+  align-items: center;
+}
 .metadata-property-key > .np-rich-property-label {
-  // Match the native key input's inset beside the property icon, including theme overrides.
+  // Use the native input's typography and inset instead of inheriting note text sizing.
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: var(--input-height);
   padding: var(--metadata-input-padding);
+  color: var(--metadata-label-text-color);
+  font-size: var(--metadata-label-font-size);
+  font-weight: var(--metadata-label-font-weight);
+  line-height: normal;
 }
 .np-rich-property-label[hidden] { display: none; }
 .np-rich-content > :first-child { margin-top: 0; }

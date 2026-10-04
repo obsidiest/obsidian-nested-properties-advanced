@@ -28,6 +28,18 @@ Source key-only hit testing also maps raw YAML positions through CodeMirror's DO
 
 ## Validation status
 
+### Property typography and icon centering reported at `4d35e9b`
+
+The user's next screenshot showed rendered math, SVG and Markdown keys with oversized text and vertically offset property icons, compared with the plain `Release Types` field. The earlier spacing regression measured only the horizontal gap and did not establish font or vertical alignment correctness.
+
+The cause was located in the released Obsidian stylesheet before editing production CSS: native key inputs use `--metadata-label-font-size`, `--metadata-label-font-weight` and `--input-height`, while the replacement labels inherited note typography and the key's flex container aligned items at the top. A larger font, wrapped label or tall SVG therefore displaced its visual center from the fixed-height icon.
+
+The test-only baseline `e0288f5` reproduced the defect in native Obsidian on Linux: with native keys set to 13 px, rendered keys used 26 px under Default and 16 px under Minimal. Default's icon center was 9.5 px above the rendered content center. All four new typography cases failed while the previous 14 focused rendering/color cases passed.
+
+The fix gives rendered metadata keys the native font size, weight, text color, padding and minimum input height. A vertically centered content column handles short labels; centering the containing key's flex items handles wrapped labels and taller SVGs. The parent alignment applies only while the rendered label is visible, preserving native alignment when editing raw syntax. SVGs retain their authored dimensions, and em-sized SVGs follow the property font.
+
+The four new native cases cover Default/Minimal and Live Preview/Reading. They compare computed font size and weight with `Release Types`, measure icon/content centers within half a pixel, exercise 13 px and 18 px metadata fonts independently of note sizing, toggle full-key expansion to include wrapping, and check a 2.5 em SVG. Existing tests retain Source and breadcrumb coverage. Final platform results are recorded in draft PR #2; the build alone does not verify these runtime behaviors, and the user's vault still needs manual acceptance.
+
 ### Property icon spacing reported at `49aaeae`
 
 The user's manual check confirmed rich rendering, but the Live Preview screenshot showed rendered keys pressed against their property icons. The plain `Release Types` key directly above them retained the correct gap. The cause was located before changing the stylesheet: Obsidian 1.13.7 gives `input.metadata-property-key-input` padding through `--metadata-input-padding`, while the replacement `.np-rich-property-label` omitted that inset.
