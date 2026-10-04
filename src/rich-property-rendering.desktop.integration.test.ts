@@ -29,9 +29,25 @@ const vault = getTemporaryVault();
 const contextId = new ContextId<RenderContext>();
 const MATH_KEY = String.raw`test $\approx$ test`;
 const SVG_KEY = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path d="M1 1h14v14H1z"/></svg>';
-const FIXTURE = `---\n${JSON.stringify(MATH_KEY)}:\n  ${JSON.stringify(SVG_KEY)}:\n    "[[Testing Document]]": "**bold value** and $x^2$"\nrichValue: ${JSON.stringify(SVG_KEY)}\nplain: ordinary\n---\n\nBody\n`;
+const FIXTURE = `---\n${JSON.stringify(MATH_KEY)}:\n  ${JSON.stringify(SVG_KEY)}:\n    "[[Testing Document]]": "**bold value** and $x^2$"\nrichValue: ${JSON.stringify(SVG_KEY)}\n"Release Types": ordinary\n---\n\nBody\n`;
+let minimalCss = '';
 
 beforeAll(async () => {
+  minimalCss = await evalInObsidian({
+    callback: async ({ app, obsidianModule: { requestUrl } }) => {
+      const response = await requestUrl('https://raw.githubusercontent.com/kepano/obsidian-minimal/504c2e9c27012f4ea7cc898d242722ee8b795dbc/theme.css');
+      const directory = `${app.vault.configDir}/themes/Minimal-rich-rendering`;
+      for (const folder of [`${app.vault.configDir}/themes`, directory]) {
+        if (!await app.vault.adapter.exists(folder)) {
+          await app.vault.adapter.mkdir(folder);
+        }
+      }
+      await app.vault.adapter.write(`${directory}/manifest.json`, JSON.stringify({ author: '@kepano', minAppVersion: '1.9.0', name: 'Minimal-rich-rendering', version: '8.2.2' }));
+      await app.vault.adapter.write(`${directory}/theme.css`, response.text);
+      return response.text;
+    },
+    vaultPath: vault.path
+  });
   await writeDesktopFixtures(vault.path, { 'rich-properties.md': FIXTURE, 'Testing Document.md': '# Linked note' });
 });
 
@@ -79,6 +95,59 @@ afterAll(async () => {
 });
 
 describe('rich properties through Obsidian MarkdownRenderer', () => {
+  it.each(['default', 'minimal'].flatMap((theme) => ['live-preview', 'reading'].map((mode) => ({ mode, theme }))))('matches native icon spacing for math, SVG and Markdown keys in $mode with $theme', async ({ mode, theme }) => {
+    const results = await evalInObsidian({
+      callback: async ({ app, context: { markdownView, tab }, css, keys, lib: { waitUntil }, modeName, themeName }) => {
+        const previousTheme = app.customCss.theme;
+        const root = markdownView.containerEl;
+        const previousPadding = root.style.getPropertyValue('--metadata-input-padding');
+        try {
+          app.customCss.setTheme(themeName === 'minimal' ? 'Minimal-rich-rendering' : '');
+          await waitUntil({ predicate: () => themeName === 'minimal' ? app.customCss.styleEl.textContent.includes(css.slice(0, 100)) : app.customCss.styleEl.textContent.trim() === '' });
+          await markdownView.leaf.setViewState({ state: { file: 'rich-properties.md', mode: modeName === 'reading' ? 'preview' : 'source', source: false }, type: 'markdown' });
+          function measureGaps(isRendered: boolean): number[] {
+            return [...keys, 'Release Types'].map((name) => {
+              const input = [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((element) => element.value === name);
+              const key = input?.closest('.metadata-property-key');
+              const icon = key?.querySelector('.metadata-property-icon');
+              const target = isRendered && name !== 'Release Types' ? key?.querySelector<HTMLElement>('.np-rich-property-label') : input;
+              if (!icon || !target) {
+                throw new Error(`Missing property key for spacing measurement: ${name}`);
+              }
+              const style = target.win.getComputedStyle(target);
+              return target.getBoundingClientRect().left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft) - icon.getBoundingClientRect().right;
+            });
+          }
+          const measurements = [];
+          // Compare real key controls and rendered labels, including a theme/snippet
+          // Override of Obsidian's own padding variable instead of assuming pixels.
+          for (const padding of ['', '6px 17px']) {
+            root.style.setProperty('--metadata-input-padding', padding);
+            await tab.setControlValue('isRichPropertyRenderingEnabled', false);
+            await waitUntil({ predicate: () => root.querySelector('.np-rich-property-label') === null });
+            const native = measureGaps(false);
+            await tab.setControlValue('isRichPropertyRenderingEnabled', true);
+            await waitUntil({ predicate: () => root.querySelector(':scope .np-rich-property-label mjx-container') !== null && root.querySelector(':scope .np-rich-property-label svg path') !== null && root.querySelector(':scope .np-rich-property-label a.internal-link') !== null });
+            measurements.push({ native, rendered: measureGaps(true) });
+          }
+          return measurements;
+        } finally {
+          root.style.setProperty('--metadata-input-padding', previousPadding);
+          app.customCss.setTheme(previousTheme);
+        }
+      },
+      contextId,
+      input: { css: minimalCss, keys: [MATH_KEY, SVG_KEY, '[[Testing Document]]'], modeName: mode, themeName: theme },
+      vaultPath: vault.path
+    });
+    for (const result of results) {
+      const reference = result.native.at(-1);
+      expect(reference).toBeGreaterThan(0);
+      expect(result.native).toEqual([reference, reference, reference, reference]);
+      expect(result.rendered).toEqual(result.native);
+    }
+  });
+
   it.each(['live-preview', 'source', 'reading'])('renders the screenshot key/value syntax and breadcrumb hierarchy in %s', async (mode) => {
     const result = await evalInObsidian({
       callback: async ({ app, context: { markdownView, tab }, fixture, lib: { hoverElement, waitUntil }, modeName }) => {
