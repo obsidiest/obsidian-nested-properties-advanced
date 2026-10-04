@@ -95,59 +95,6 @@ afterAll(async () => {
 });
 
 describe('rich properties through Obsidian MarkdownRenderer', () => {
-  it.each(['default', 'minimal'].flatMap((theme) => ['live-preview', 'reading'].map((mode) => ({ mode, theme }))))('matches native icon spacing for math, SVG and Markdown keys in $mode with $theme', async ({ mode, theme }) => {
-    const results = await evalInObsidian({
-      callback: async ({ app, context: { markdownView, tab }, css, keys, lib: { waitUntil }, modeName, themeName }) => {
-        const previousTheme = app.customCss.theme;
-        const root = markdownView.containerEl;
-        const previousPadding = root.style.getPropertyValue('--metadata-input-padding');
-        try {
-          app.customCss.setTheme(themeName === 'minimal' ? 'Minimal-rich-rendering' : '');
-          await waitUntil({ predicate: () => themeName === 'minimal' ? app.customCss.styleEl.textContent.includes(css.slice(0, 100)) : app.customCss.styleEl.textContent.trim() === '' });
-          await markdownView.leaf.setViewState({ state: { file: 'rich-properties.md', mode: modeName === 'reading' ? 'preview' : 'source', source: false }, type: 'markdown' });
-          function measureGaps(isRendered: boolean): number[] {
-            return [...keys, 'Release Types'].map((name) => {
-              const input = [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((element) => element.value === name);
-              const key = input?.closest('.metadata-property-key');
-              const icon = key?.querySelector('.metadata-property-icon');
-              const target = isRendered && name !== 'Release Types' ? key?.querySelector<HTMLElement>('.np-rich-property-label') : input;
-              if (!icon || !target) {
-                throw new Error(`Missing property key for spacing measurement: ${name}`);
-              }
-              const style = target.win.getComputedStyle(target);
-              return target.getBoundingClientRect().left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft) - icon.getBoundingClientRect().right;
-            });
-          }
-          const measurements = [];
-          // Compare real key controls and rendered labels, including a theme/snippet
-          // Override of Obsidian's own padding variable instead of assuming pixels.
-          for (const padding of ['', '6px 17px']) {
-            root.style.setProperty('--metadata-input-padding', padding);
-            await tab.setControlValue('isRichPropertyRenderingEnabled', false);
-            await waitUntil({ predicate: () => root.querySelector('.np-rich-property-label') === null });
-            const native = measureGaps(false);
-            await tab.setControlValue('isRichPropertyRenderingEnabled', true);
-            await waitUntil({ predicate: () => root.querySelector(':scope .np-rich-property-label mjx-container') !== null && root.querySelector(':scope .np-rich-property-label svg path') !== null && root.querySelector(':scope .np-rich-property-label a.internal-link') !== null });
-            measurements.push({ native, rendered: measureGaps(true) });
-          }
-          return measurements;
-        } finally {
-          root.style.setProperty('--metadata-input-padding', previousPadding);
-          app.customCss.setTheme(previousTheme);
-        }
-      },
-      contextId,
-      input: { css: minimalCss, keys: [MATH_KEY, SVG_KEY, '[[Testing Document]]'], modeName: mode, themeName: theme },
-      vaultPath: vault.path
-    });
-    for (const result of results) {
-      const reference = result.native.at(-1);
-      expect(reference).toBeGreaterThan(0);
-      expect(result.native).toEqual([reference, reference, reference, reference]);
-      expect(result.rendered).toEqual(result.native);
-    }
-  });
-
   it.each(['live-preview', 'source', 'reading'])('renders the screenshot key/value syntax and breadcrumb hierarchy in %s', async (mode) => {
     const result = await evalInObsidian({
       callback: async ({ app, context: { markdownView, tab }, fixture, lib: { hoverElement, waitUntil }, modeName }) => {
@@ -255,5 +202,59 @@ describe('rich properties through Obsidian MarkdownRenderer', () => {
     });
     expect(result.focused).toBe(true);
     expect(result.key).toBe(mode === 'source' ? JSON.stringify(MATH_KEY).slice(0, -1) : MATH_KEY);
+  });
+
+  it.each(['default', 'minimal'].flatMap((theme) => ['live-preview', 'reading'].map((mode) => ({ mode, theme }))))('matches native icon spacing for math, SVG and Markdown keys in $mode with $theme', async ({ mode, theme }) => {
+    const results = await evalInObsidian({
+      callback: async ({ app, context: { markdownView, tab }, css, keys, lib: { waitUntil }, modeName, themeName }) => {
+        const previousTheme = app.customCss.theme;
+        const root = markdownView.containerEl;
+        const previousPadding = root.style.getPropertyValue('--metadata-input-padding');
+        try {
+          app.customCss.setTheme(themeName === 'minimal' ? 'Minimal-rich-rendering' : '');
+          await waitUntil({ predicate: () => themeName === 'minimal' ? app.customCss.styleEl.textContent.includes(css.slice(0, 100)) : app.customCss.styleEl.textContent.trim() === '' });
+          await markdownView.leaf.setViewState({ state: { file: 'rich-properties.md', mode: modeName === 'reading' ? 'preview' : 'source', source: false }, type: 'markdown' });
+          await waitUntil({ predicate: () => [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].filter((input) => keys.includes(input.value)).length === keys.length });
+          function measureGaps(isRendered: boolean): number[] {
+            return [...keys, 'Release Types'].map((name) => {
+              const input = [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((element) => element.value === name);
+              const key = input?.closest('.metadata-property-key');
+              const icon = key?.querySelector('.metadata-property-icon');
+              const target = isRendered && name !== 'Release Types' ? key?.querySelector<HTMLElement>('.np-rich-property-label') : input;
+              if (!icon || !target) {
+                throw new Error(`Missing property key for spacing measurement: ${name}`);
+              }
+              const style = target.win.getComputedStyle(target);
+              return target.getBoundingClientRect().left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft) - icon.getBoundingClientRect().right;
+            });
+          }
+          const measurements = [];
+          // Compare real key controls and rendered labels, including a theme/snippet
+          // Override of Obsidian's own padding variable instead of assuming pixels.
+          for (const padding of ['', '6px 17px']) {
+            root.style.setProperty('--metadata-input-padding', padding);
+            await tab.setControlValue('isRichPropertyRenderingEnabled', false);
+            await waitUntil({ predicate: () => root.querySelector('.np-rich-property-label') === null && [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].filter((input) => keys.includes(input.value)).length === keys.length });
+            const native = measureGaps(false);
+            await tab.setControlValue('isRichPropertyRenderingEnabled', true);
+            await waitUntil({ predicate: () => root.querySelector(':scope .np-rich-property-label mjx-container') !== null && root.querySelector(':scope .np-rich-property-label svg path') !== null && root.querySelector(':scope .np-rich-property-label a.internal-link') !== null });
+            measurements.push({ native, rendered: measureGaps(true) });
+          }
+          return measurements;
+        } finally {
+          root.style.setProperty('--metadata-input-padding', previousPadding);
+          app.customCss.setTheme(previousTheme);
+        }
+      },
+      contextId,
+      input: { css: minimalCss, keys: [MATH_KEY, SVG_KEY, '[[Testing Document]]'], modeName: mode, themeName: theme },
+      vaultPath: vault.path
+    });
+    for (const result of results) {
+      const reference = result.native.at(-1);
+      expect(reference).toBeGreaterThan(0);
+      expect(result.native).toEqual([reference, reference, reference, reference]);
+      expect(result.rendered).toEqual(result.native);
+    }
   });
 });

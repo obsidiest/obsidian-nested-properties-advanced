@@ -28,6 +28,14 @@ Source key-only hit testing also maps raw YAML positions through CodeMirror's DO
 
 ## Validation status
 
+### Property icon spacing reported at `49aaeae`
+
+The user's manual check confirmed rich rendering, but the Live Preview screenshot showed rendered keys pressed against their property icons. The plain `Release Types` key directly above them retained the correct gap. The cause was located before changing the stylesheet: Obsidian 1.13.7 gives `input.metadata-property-key-input` padding through `--metadata-input-padding`, while the replacement `.np-rich-property-label` omitted that inset.
+
+A native Obsidian regression was published before the CSS fix. On Linux, both Default and Minimal measured a zero-pixel icon-to-content gap for all three rendered keys, versus eight pixels for their native inputs and the plain reference key. The fix applies the host's padding variable specifically to rendered labels directly inside `.metadata-property-key`. The regression compares root and nested math, SVG and Markdown keys with the plain reference, in both Live Preview and Reading, under Default and Minimal 8.2.2; it also checks a custom padding variable. Source and breadcrumb rendering keep their existing selectors. Final platform results are recorded in draft PR #2.
+
+### Rendering and interaction checks
+
 Local unit tests cover YAML decoding and exact ranges for the screenshot examples, per-mode settings, intact renderer delegation and late resource cleanup, and awaited color saves/failures/theme independence. These use adapters and do not prove desktop rendering.
 
 New desktop suites exercise the real Obsidian renderer, MathJax, SVG, formatting and links in all three modes; restored raw display when a mode is disabled; unchanged note text; and single-click caret retention. A second suite installs the released Style Settings 1.0.9 in the harness's temporary vault and checks its real color controls, on-disk data, CSS and reopening. The initial Windows/Linux runs each passed 100 of 105 cases. Rich breadcrumb tests incorrectly hovered the root while expecting descendants; corrected tests hover the deepest field. The next run at `a35c8be` passed 112 of 116 on both platforms, including all ten new navigation cases and all six rich-rendering cases. Two history assertions counted intentional breadcrumb preview scrolling; they now measure undo and redo around their respective scroll baselines.

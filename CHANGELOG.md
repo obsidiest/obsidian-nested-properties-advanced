@@ -2,6 +2,8 @@
 
 ## 2.1.0 (in development)
 
+- fix: preserve native property-key padding beside icons for rendered LaTeX, SVG and Markdown labels, including theme and snippet overrides
+
 - fix: enhance Style Settings color and precision controls in Obsidian 1.13 Settings windows, including window closure and plugin reload cleanup
 
 - feat: add before-timeout scroll previews and optional after-timeout breadcrumb navigation, adapted from List Tree Indentation Guides 2.0.2, with Escape cancellation and unchanged hover caret position

@@ -1406,6 +1406,10 @@ settings:
   overflow-wrap: anywhere;
   cursor: text;
 }
+.metadata-property-key > .np-rich-property-label {
+  // Match the native key input's inset beside the property icon, including theme overrides.
+  padding: var(--metadata-input-padding);
+}
 .np-rich-property-label[hidden] { display: none; }
 .np-rich-content > :first-child { margin-top: 0; }
 .np-rich-content > :last-child { margin-bottom: 0; }
