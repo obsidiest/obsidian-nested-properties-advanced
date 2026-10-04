@@ -30,6 +30,8 @@ const contextId = new ContextId<RenderContext>();
 const MATH_KEY = String.raw`test $\approx$ test`;
 const SVG_KEY = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path d="M1 1h14v14H1z"/></svg>';
 const FIXTURE = `---\n${JSON.stringify(MATH_KEY)}:\n  ${JSON.stringify(SVG_KEY)}:\n    "[[Testing Document]]": "**bold value** and $x^2$"\nrichValue: ${JSON.stringify(SVG_KEY)}\n"Release Types": ordinary\n---\n\nBody\n`;
+const TALL_SVG_KEY = SVG_KEY.replace('height="16"', 'height="2.5em"');
+const TYPOGRAPHY_FIXTURE = FIXTURE.replace(JSON.stringify(SVG_KEY), () => JSON.stringify(TALL_SVG_KEY));
 let minimalCss = '';
 
 beforeAll(async () => {
@@ -255,6 +257,85 @@ describe('rich properties through Obsidian MarkdownRenderer', () => {
       expect(reference).toBeGreaterThan(0);
       expect(result.native).toEqual([reference, reference, reference, reference]);
       expect(result.rendered).toEqual(result.native);
+    }
+  });
+
+  it.each(['default', 'minimal'].flatMap((theme) => ['live-preview', 'reading'].map((mode) => ({ mode, theme }))))('matches native typography and centers icons beside rendered keys in $mode with $theme', async ({ mode, theme }) => {
+    const measurements = await evalInObsidian({
+      callback: async ({ app, context: { markdownView, tab }, css, fixture, keys, lib: { waitUntil }, modeName, themeName }) => {
+        const previousTheme = app.customCss.theme;
+        const root = markdownView.containerEl;
+        const originalStyle = root.style.cssText;
+        const previousFullKeySettings = ['isGlobalToggleFullKeyNamesEnabled', 'isGlobalExpandFullKeyNamesEnabled', 'isGlobalCollapseFullKeyNamesEnabled'].map((key) => ({ key, value: tab.getControlValue(key) }));
+        try {
+          app.customCss.setTheme(themeName === 'minimal' ? 'Minimal-rich-rendering' : '');
+          await waitUntil({ predicate: () => themeName === 'minimal' ? app.customCss.styleEl.textContent.includes(css.slice(0, 100)) : app.customCss.styleEl.textContent.trim() === '' });
+          const file = app.vault.getFileByPath('rich-properties.md');
+          if (file === null) {
+            throw new Error('Typography fixture missing');
+          }
+          await app.vault.modify(file, fixture);
+          await markdownView.leaf.setViewState({ state: { file: file.path, mode: modeName === 'reading' ? 'preview' : 'source', source: false }, type: 'markdown' });
+          await waitUntil({ predicate: () => keys.every((name) => [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].some((input) => input.value === name && input.parentElement?.querySelector('.np-rich-property-label') !== null)) && root.querySelector(':scope .np-rich-property-label mjx-container') !== null && root.querySelector(':scope .np-rich-property-label svg[height="2.5em"]') !== null && root.querySelector(':scope .np-rich-property-label a.internal-link') !== null });
+          await tab.setControlValue('isGlobalToggleFullKeyNamesEnabled', true);
+          const results = [];
+          // Separate note text sizing from metadata sizing and also force wrapped keys.
+          for (const fontSize of ['13px', '18px']) {
+            root.setCssProps({ '--font-text-size': '26px', '--metadata-label-font-size': fontSize, '--metadata-label-font-weight': '500', '--metadata-label-width': '100px' });
+            for (const isWrapped of [false, true]) {
+              await tab.setControlValue(isWrapped ? 'isGlobalCollapseFullKeyNamesEnabled' : 'isGlobalExpandFullKeyNamesEnabled', true);
+              await waitUntil({ predicate: () => root.querySelector('.metadata-container')?.classList.contains('nested-properties-full-key-display') === !isWrapped });
+              const reference = [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((input) => input.value === 'Release Types');
+              if (reference === undefined) {
+                throw new Error('Native typography reference missing');
+              }
+              const referenceStyle = reference.win.getComputedStyle(reference);
+              for (const name of keys) {
+                const input = [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((element) => element.value === name);
+                const key = input?.closest<HTMLElement>('.metadata-property-key');
+                const icon = key?.querySelector<HTMLElement>('.metadata-property-icon');
+                const label = key?.querySelector<HTMLElement>('.np-rich-property-label');
+                const content = label?.firstElementChild;
+                if (!key || !icon || !label || !content) {
+                  throw new Error('Rendered typography target missing');
+                }
+                const labelStyle = label.win.getComputedStyle(label);
+                const iconRect = icon.getBoundingClientRect();
+                const contentRect = content.getBoundingClientRect();
+                const svgHeight = label.querySelector('svg[height="2.5em"]')?.getBoundingClientRect().height;
+                results.push({
+                  centerDelta: (iconRect.top + iconRect.bottom - contentRect.top - contentRect.bottom) / 2,
+                  fontSize: labelStyle.fontSize,
+                  fontWeight: labelStyle.fontWeight,
+                  nativeFontSize: referenceStyle.fontSize,
+                  nativeFontWeight: referenceStyle.fontWeight,
+                  svgHeight,
+                  wrapped: isWrapped
+                });
+              }
+            }
+          }
+          return results;
+        } finally {
+          // eslint-disable-next-line require-atomic-updates -- Restore temporary styles owned by this isolated test view.
+          root.style.cssText = originalStyle;
+          for (const setting of previousFullKeySettings) {
+            await tab.setControlValue(setting.key, setting.value);
+          }
+          app.customCss.setTheme(previousTheme);
+        }
+      },
+      contextId,
+      input: { css: minimalCss, fixture: TYPOGRAPHY_FIXTURE, keys: [MATH_KEY, TALL_SVG_KEY, '[[Testing Document]]'], modeName: mode, themeName: theme },
+      vaultPath: vault.path
+    });
+    for (const measurement of measurements) {
+      expect(measurement.fontSize, JSON.stringify(measurement)).toBe(measurement.nativeFontSize);
+      expect(measurement.fontWeight, JSON.stringify(measurement)).toBe(measurement.nativeFontWeight);
+      expect(Math.abs(measurement.centerDelta), JSON.stringify(measurement)).toBeLessThanOrEqual(0.5);
+      if (measurement.svgHeight !== undefined) {
+        expect(measurement.svgHeight).toBeCloseTo(Number.parseFloat(measurement.nativeFontSize) * 2.5, 1);
+      }
     }
   });
 });
