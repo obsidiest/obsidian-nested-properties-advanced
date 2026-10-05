@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   desktop-property-visuals:
-    name: Property visuals in Obsidian (${{ matrix.os }})
+    name: Property visuals in Obsidian ${{ matrix.obsidian }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -19,11 +19,19 @@ jobs:
         include:
           - os: ubuntu-latest
             installer: 1.13.7
+            obsidian: 1.13.7
           - os: windows-latest
             installer: 1.13.4
+            obsidian: 1.13.7
+          - os: ubuntu-latest
+            installer: 1.14.4
+            obsidian: 1.14.4
+          - os: windows-latest
+            installer: 1.14.4
+            obsidian: 1.14.4
     env:
       OBSIDIAN_INSTALLER_VERSION: ${{ matrix.installer }}
-      OBSIDIAN_VERSION: 1.13.7
+      OBSIDIAN_VERSION: ${{ matrix.obsidian }}
 
     steps:
       - name: Check out the pull request
