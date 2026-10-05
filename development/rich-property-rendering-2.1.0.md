@@ -28,6 +28,18 @@ Source key-only hit testing also maps raw YAML positions through CodeMirror's DO
 
 ## Validation status
 
+### Missing main UI rendering reported at `d44fb07`
+
+The user's next screenshot showed raw math, SVG and Markdown in every main UI key while all three breadcrumb labels rendered correctly. This blocked manual acceptance of the typography and centering changes. The earlier passing tests did not cover this state: they opened fresh views and repeatedly refreshed settings before checking rendering.
+
+Before editing the renderer, the lifecycle gap was located and reproduced in native Obsidian. `renderVisibleViews()` skipped views with zero width before attaching observers, and disconnected observers from views that became hidden. Revealing such a view could therefore leave every property control raw until an unrelated file, settings or workspace event forced another pass. The released application handles view resizing separately from workspace layout changes.
+
+The test-only baseline `09ce284` reloaded the plugin with an existing view hidden, waited for startup frames, then revealed it without refreshing settings or reopening the file. On both Windows and Linux, all four new cases failed: Live Preview and Reading, in ordinary and popout windows, each had **three rendered breadcrumb labels and zero main UI labels** after five seconds. All 18 previous focused tests still passed. This establishes a reproducible path to the reported appearance; the screenshot alone does not establish the exact preceding sequence in the user's vault.
+
+The correction retains lifecycle observation for loaded views while they are hidden or in Source mode. A resize observer schedules work when a view becomes visible, and mode-class changes are observed without reacting to the renderer's own attribute writes. Hidden views do not render rich content. Each window owns its animation-frame queue so popout windows do not depend on a hidden main window. Observers, labels and render scopes are cleaned when views close, move between windows or the plugin unloads.
+
+The new native cases require visible main UI labels with hidden raw controls after restoration. They also compare the restored math/SVG/Markdown fonts against the plain `Release Types` field and check icon/content centers within half a pixel. The existing Default/Minimal typography, wrapping, SVG scaling, padding, Source and breadcrumb cases remain in place. After the user reported updating Obsidian, the native CI matrix was extended to cover both 1.13.7 and 1.14.4 on Windows and Linux. Final results are recorded in draft PR #2; manual visual acceptance in the user's vault remains pending.
+
 ### Property typography and icon centering reported at `4d35e9b`
 
 The user's next screenshot showed rendered math, SVG and Markdown keys with oversized text and vertically offset property icons, compared with the plain `Release Types` field. The earlier spacing regression measured only the horizontal gap and did not establish font or vertical alignment correctness.

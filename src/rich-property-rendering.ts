@@ -54,6 +54,8 @@ interface ObservedPropertyView {
   cleanup(): void;
   readonly fields: Map<HTMLElement, RenderedField>;
   readonly observer: MutationObserver;
+  readonly ownerWindow: Window;
+  readonly resizeObserver: ResizeObserver;
 }
 
 interface RenderedField {
@@ -115,7 +117,7 @@ Native inputs retain ownership of editing; their inactive display is rendered se
 */
 export class RichPropertyRenderingComponent extends Component {
   private readonly editors = new Set<EditorView>();
-  private frame: null | number = null;
+  private readonly frames = new Map<Window, number>();
   private isActive = false;
   private readonly sourceContent = new WeakMap<Text, PropertySourceContent[]>();
   private readonly views = new Map<MarkdownView, ObservedPropertyView>();
@@ -143,14 +145,14 @@ export class RichPropertyRenderingComponent extends Component {
       EditorView.atomicRanges.of((view) => view.state.field(decorations)),
       ViewPlugin.define((view) => {
         this.editors.add(view);
-        this.schedule();
+        this.schedule(view.dom.win);
         return {
           destroy: (): void => {
             this.editors.delete(view);
           },
           update: (update): void => {
             if (update.docChanged || update.startState.field(livePreviewField, false) !== update.state.field(livePreviewField, false)) {
-              this.schedule();
+              this.schedule(view.dom.win);
             }
           }
         };
@@ -179,9 +181,10 @@ export class RichPropertyRenderingComponent extends Component {
 
   public override onunload(): void {
     this.isActive = false;
-    if (this.frame !== null) {
-      window.cancelAnimationFrame(this.frame);
+    for (const [ownerWindow, frame] of this.frames) {
+      ownerWindow.cancelAnimationFrame(frame);
     }
+    this.frames.clear();
     for (const record of this.views.values()) {
       this.clearView(record);
     }
@@ -196,21 +199,32 @@ export class RichPropertyRenderingComponent extends Component {
     this.schedule();
   }
 
-  private clearView(record: ObservedPropertyView): void {
-    record.observer.disconnect();
-    record.cleanup();
+  private clearFields(record: ObservedPropertyView): void {
     for (const [raw, rendered] of record.fields) {
       this.removeField(raw, rendered);
     }
     record.fields.clear();
   }
 
+  private clearView(record: ObservedPropertyView): void {
+    record.observer.disconnect();
+    record.resizeObserver.disconnect();
+    record.cleanup();
+    this.clearFields(record);
+  }
+
   private observeView(view: MarkdownView): ObservedPropertyView {
-    const Observer = view.containerEl.ownerDocument.defaultView?.MutationObserver ?? MutationObserver;
+    const root = view.containerEl;
+    const ownerWindow = root.win;
+    const Observer = root.ownerDocument.defaultView?.MutationObserver ?? MutationObserver;
     const observer = new Observer((mutations) => {
       if (
         mutations.some((mutation) => {
           const target = getHtmlElement(mutation.target);
+          if (mutation.type === 'attributes') {
+            return target?.matches('.markdown-source-view') === true
+              && (mutation.oldValue ?? '').split(/\s+/u).includes('is-live-preview') !== target.classList.contains('is-live-preview');
+          }
           if (target?.closest(richLabelSelector)) {
             return false;
           }
@@ -221,13 +235,18 @@ export class RichPropertyRenderingComponent extends Component {
           return Boolean(target?.closest('.metadata-container')) || nodes.some((node) => getHtmlElement(node)?.matches('.metadata-container') === true || Boolean(getHtmlElement(node)?.querySelector('.metadata-container')));
         })
       ) {
-        this.schedule();
+        this.schedule(root.win);
       }
     });
-    observer.observe(view.contentEl, { characterData: true, childList: true, subtree: true });
+    observer.observe(root, { attributeFilter: ['class'], attributeOldValue: true, attributes: true, characterData: true, childList: true, subtree: true });
     const schedule = (): void => {
-      this.schedule();
+      this.schedule(root.win);
     };
+    // A hidden/restoring tab may have no metadata or usable editor geometry yet.
+    // Keep its lifecycle observation alive so becoming visible can start rendering.
+    const ResizeObserverConstructor = root.ownerDocument.defaultView?.ResizeObserver ?? ResizeObserver;
+    const resizeObserver = new ResizeObserverConstructor(schedule);
+    resizeObserver.observe(root);
     // Reveal a native control synchronously when navigation or Tab focuses it.
     const reveal = (event: FocusEvent): void => {
       const raw = getHtmlElement(event.target);
@@ -236,17 +255,19 @@ export class RichPropertyRenderingComponent extends Component {
         raw.classList.remove('np-rich-property-raw');
         record.label.hidden = true;
       }
-      this.schedule();
+      this.schedule(root.win);
     };
-    view.contentEl.addEventListener('focusin', reveal, { capture: true });
-    view.contentEl.addEventListener('focusout', schedule, { capture: true });
+    root.addEventListener('focusin', reveal, { capture: true });
+    root.addEventListener('focusout', schedule, { capture: true });
     const record: ObservedPropertyView = {
       cleanup: () => {
-        view.contentEl.removeEventListener('focusin', reveal, true);
-        view.contentEl.removeEventListener('focusout', schedule, true);
+        root.removeEventListener('focusin', reveal, true);
+        root.removeEventListener('focusout', schedule, true);
       },
       fields: new Map(),
-      observer
+      observer,
+      ownerWindow,
+      resizeObserver
     };
     this.views.set(view, record);
     return record;
@@ -317,7 +338,7 @@ export class RichPropertyRenderingComponent extends Component {
   private renderFields(view: MarkdownView, record: ObservedPropertyView): void {
     const wanted = new Set<HTMLElement>();
     const path = view.file?.path ?? '';
-    for (const row of view.contentEl.querySelectorAll<HTMLElement>(':scope .metadata-container .metadata-property')) {
+    for (const row of view.containerEl.querySelectorAll<HTMLElement>(':scope .metadata-container .metadata-property')) {
       const key = row.querySelector<HTMLInputElement>(':scope > .metadata-property-key .metadata-property-key-input');
       if (key !== null) {
         this.renderField(record, wanted, key, key.value, path);
@@ -349,38 +370,63 @@ export class RichPropertyRenderingComponent extends Component {
     }
   }
 
-  private renderVisibleViews(): void {
-    const visible = new Set<MarkdownView>();
+  private renderVisibleViews(ownerWindow: Window): void {
+    const openViews = new Set<MarkdownView>();
     for (const { view } of this.app.workspace.getLeavesOfType('markdown')) {
-      if (!(view instanceof MarkdownView) || view.containerEl.getBoundingClientRect().width === 0) {
-        continue;
+      if (view instanceof MarkdownView) {
+        openViews.add(view);
       }
-      const mode = view.getMode() === 'preview' ? 'reading' : (view.contentEl.querySelector('.markdown-source-view.is-live-preview') ? 'live-preview' : 'source');
-      if (mode === 'source' || !isRichPropertyRenderingEnabled(this.settings.settings, mode)) {
-        continue;
-      }
-      visible.add(view);
-      const record = this.views.get(view) ?? this.observeView(view);
-      this.renderFields(view, record);
     }
     for (const [view, record] of this.views) {
-      if (visible.has(view)) {
+      if (openViews.has(view) && record.ownerWindow === view.containerEl.win && !record.ownerWindow.closed) {
         continue;
       }
 
       this.clearView(record);
       this.views.delete(view);
     }
+    for (const view of openViews) {
+      if (view.containerEl.win !== ownerWindow) {
+        continue;
+      }
+      const record = this.views.get(view) ?? this.observeView(view);
+      const mode = view.getMode() === 'preview' ? 'reading' : (view.containerEl.querySelector('.markdown-source-view.is-live-preview') ? 'live-preview' : 'source');
+      if (view.containerEl.getBoundingClientRect().width === 0 || mode === 'source' || !isRichPropertyRenderingEnabled(this.settings.settings, mode)) {
+        this.clearFields(record);
+        continue;
+      }
+      this.renderFields(view, record);
+    }
   }
 
-  private schedule(): void {
-    if (!this.isActive || this.frame !== null) {
+  private schedule(ownerWindow?: Window): void {
+    if (!this.isActive) {
       return;
     }
-    this.frame = window.requestAnimationFrame(() => {
-      this.frame = null;
-      this.renderVisibleViews();
-    });
+    for (const target of this.frames.keys()) {
+      if (target.closed) {
+        this.frames.delete(target);
+      }
+    }
+    const windows = new Set(ownerWindow === undefined ? [window] : [ownerWindow]);
+    if (ownerWindow === undefined) {
+      for (const { view } of this.app.workspace.getLeavesOfType('markdown')) {
+        windows.add(view.containerEl.win);
+      }
+    }
+    for (const target of windows) {
+      if (target.closed || this.frames.has(target)) {
+        continue;
+      }
+      // A popout must not wait for animation frames in a hidden main window.
+      this.frames.set(
+        target,
+        target.requestAnimationFrame(() => {
+          this.frames.delete(target);
+          this.renderVisibleViews(target);
+        })
+      );
+    }
   }
 
   private sourceDecorations(state: EditorState): DecorationSet {
