@@ -97,6 +97,92 @@ afterAll(async () => {
 });
 
 describe('rich properties through Obsidian MarkdownRenderer', () => {
+  it.each(['live-preview', 'reading'].flatMap((mode) => [false, true].map((popout) => ({ mode, popout }))))('renders a restored view after plugin reload in $mode with popout=$popout', async ({ mode, popout }) => {
+    const result = await evalInObsidian({
+      callback: async ({ app, context: { markdownView }, css, keys, lib: { waitUntil }, modeName, usePopout }) => {
+        const previousTheme = app.customCss.theme;
+        const root = markdownView.containerEl;
+        try {
+          app.customCss.setTheme('Minimal-rich-rendering');
+          await waitUntil({ predicate: () => app.customCss.styleEl.textContent.includes(css.slice(0, 100)) });
+          await markdownView.leaf.setViewState({ state: { file: 'rich-properties.md', mode: modeName === 'reading' ? 'preview' : 'source', source: false }, type: 'markdown' });
+          if (usePopout) {
+            const opened = app.workspace.moveLeafToPopout(markdownView.leaf, { size: { height: 1000, width: 1100 } });
+            opened.win.electronWindow.focus();
+            await waitUntil({ predicate: () => root.ownerDocument === opened.doc && opened.doc.hasFocus() });
+          }
+          await waitUntil({ predicate: () => root.querySelector(':scope .np-rich-property-label mjx-container') !== null });
+          // A restored tab may still be hidden while the plugin attaches. Reveal it
+          // After startup work settles, without a settings change or file-open event.
+          root.hide();
+          await app.plugins.disablePlugin('nested-properties-advanced');
+          await app.plugins.enablePlugin('nested-properties-advanced');
+          for (let frame = 0; frame < 3; frame++) {
+            await new Promise<void>((resolve) => {
+              root.win.requestAnimationFrame(() => {
+                resolve();
+              });
+            });
+          }
+          const hiddenWidth = root.getBoundingClientRect().width;
+          root.show();
+          await waitUntil({ predicate: () => root.getBoundingClientRect().width > 0 });
+          const key = [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((input) => input.value === keys[2]);
+          if (key?.parentElement === null || key === undefined) {
+            throw new Error('Restored property key missing');
+          }
+          const keyRect = key.parentElement.getBoundingClientRect();
+          root.win.electronWindow.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round((keyRect.left + keyRect.right) / 2), y: Math.round((keyRect.top + keyRect.bottom) / 2) });
+          const doc = root.ownerDocument;
+          await waitUntil({ predicate: () => doc.querySelector(':scope .np-property-breadcrumb-label mjx-container') !== null && doc.querySelector(':scope .np-property-breadcrumb-label svg path') !== null && doc.querySelector(':scope .np-property-breadcrumb-label a.internal-link') !== null });
+          try {
+            await waitUntil({ predicate: () => root.querySelector(':scope .np-rich-property-label mjx-container') !== null && root.querySelector(':scope .np-rich-property-label svg path') !== null && root.querySelector(':scope .np-rich-property-label a.internal-link') !== null });
+          } catch (error) {
+            throw new Error(`Main UI rendering did not return after revealing the view: ${JSON.stringify({ breadcrumbLabels: doc.querySelectorAll('.np-property-breadcrumb-label').length, hiddenWidth, labels: root.querySelectorAll('.np-rich-property-label').length, mode: markdownView.getMode(), sourceClass: root.querySelector('.markdown-source-view')?.className, width: root.getBoundingClientRect().width })}`, { cause: error });
+          }
+          const reference = [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((input) => input.value === 'Release Types');
+          if (reference === undefined) {
+            throw new Error('Native typography reference missing');
+          }
+          return {
+            fields: keys.map((name) => {
+              const input = [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((element) => element.value === name);
+              const label = input?.parentElement?.querySelector<HTMLElement>('.np-rich-property-label');
+              const icon = input?.parentElement?.querySelector('.metadata-property-icon');
+              const content = label?.firstElementChild;
+              if (!input || !label || !icon || !content) {
+                throw new Error(`Missing rendered field after view restore: ${name}`);
+              }
+              const iconRect = icon.getBoundingClientRect();
+              const contentRect = content.getBoundingClientRect();
+              return {
+                centerDelta: (iconRect.top + iconRect.bottom - contentRect.top - contentRect.bottom) / 2,
+                fontSize: label.win.getComputedStyle(label).fontSize,
+                nativeFontSize: reference.win.getComputedStyle(reference).fontSize,
+                rawOpacity: input.win.getComputedStyle(input).opacity,
+                visible: !label.hidden && label.getBoundingClientRect().height > 0
+              };
+            }),
+            hiddenWidth
+          };
+        } finally {
+          root.show();
+          app.customCss.setTheme(previousTheme);
+        }
+      },
+      contextId,
+      input: { css: minimalCss, keys: [MATH_KEY, SVG_KEY, '[[Testing Document]]'], modeName: mode, usePopout: popout },
+      vaultPath: vault.path
+    });
+    expect(result.hiddenWidth).toBe(0);
+    for (const field of result.fields) {
+      expect(field.visible).toBe(true);
+      expect(field.rawOpacity).toBe('0');
+      expect(field.fontSize).toBe(field.nativeFontSize);
+      expect(Math.abs(field.centerDelta)).toBeLessThanOrEqual(0.5);
+    }
+  });
+
   it.each(['live-preview', 'source', 'reading'])('renders the screenshot key/value syntax and breadcrumb hierarchy in %s', async (mode) => {
     const result = await evalInObsidian({
       callback: async ({ app, context: { markdownView, tab }, fixture, lib: { hoverElement, waitUntil }, modeName }) => {
