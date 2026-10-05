@@ -28,7 +28,6 @@ level1Nested:
 (Main Settings) Active Property Field Threading Toggle ENABLED; (Style Settings) Global Override Property Field Thread Colors Toggle ENABLED - Default Color; Active Property Field Threading in Main UI ENABLED; Property Field Threading in Source Mode ENABLED
 <img width="2558" height="1438" alt="Source Mode Example" src="https://github.com/user-attachments/assets/003fa435-ded9-4357-acef-a1f3d85f6aa5" />
 
-
 ## Demo vault
 
 **The documentation is a demo vault.** Every feature has a note whose own frontmatter demonstrates it — open the note, look at the Properties panel, and you are looking at the feature.
@@ -43,6 +42,7 @@ A copy of the vault ships with every release. You can access it via any of the f
 
 ## What it does
 
+- **Render LaTeX, SVG, and Markdown in property keys, text values, and hover breadcrumbs.** The global rendering switch and its Live Preview, Source, and Reading mode switches start enabled. Focus a rendered field to edit its original syntax; Source shows raw YAML on the selected property line. [12 Rich property content](<./demo-vault/12 Rich property content.md>)
 - **Nested objects and arrays as a tree** in the Properties panel, collapsible to any depth. [01 Nested objects](<./demo-vault/01 Nested objects.md>) · [02 Nested arrays](<./demo-vault/02 Nested arrays.md>) · [05 Deeply nested and scrolling](<./demo-vault/05 Deeply nested and scrolling.md>)
 - **Mixed and complex shapes** — lists holding different types, and arrays of objects. [03 Mixed lists](<./demo-vault/03 Mixed lists.md>) · [04 Array of objects](<./demo-vault/04 Array of objects.md>)
 - **Edit in place** — add, rename, remove and reorder entries from the context menu, and change a nested property's type without rewriting the YAML. [06 Context menu actions](<./demo-vault/06 Context menu actions.md>) · [07 Changing property types](<./demo-vault/07 Changing property types.md>)
@@ -54,7 +54,7 @@ A copy of the vault ships with every release. You can access it via any of the f
 - **Set the hover breadcrumb timeout** globally or individually for Live Preview, Source, and Reading mode. Numerical inputs accept decimal seconds; all four defaults are 0.01 seconds. Existing saved values are preserved. Enabled individual controls override the global value. The popover remains available for the configured delay while crossing the gap to its navigation buttons.
 - **Thread an active property tree** by hovered field or focused cursor, with active-path, all-branches, root-level, per-mode, Main UI, and Hover Breadcrumb controls adapted from [List Tree Indentation Guides 1.1.0](https://github.com/obsidiest/obsidian-list-tree-indentation-guides/releases/tag/1.1.0).
 - **Remember or globally control Main UI toggles** for nested-tree expansion and full key names while keeping per-note controls visible and optionally inaccessible.
-- **Style the visual system** through Style Settings, including guide geometry, line patterns, per-depth colors, active-tree highlighting, breadcrumb typography, spacing, borders, and shadows. Every numerical slider receives a synchronized precise numerical input.
+- **Style the visual system** through Style Settings, including guide geometry, line patterns, per-depth colors, active-tree highlighting, breadcrumb typography, spacing, borders, and shadows. Every numerical slider receives a synchronized precise numerical input. Themed colors use the color/hex dialog adapted from [List Tree Indentation Guides 2.0.2](https://github.com/obsidiest/obsidian-list-tree-indentation-guides/releases/tag/2.0.2), with independent light/dark values, alpha hex support, and an awaited Save.
 
 The plugin settings page is searchable. Subfeature settings remain visible but inaccessible until their superordinate feature is enabled.
 

@@ -78,9 +78,9 @@ describe('NestedPropertiesPluginSettingTab', () => {
     const controls = items.map((item) => item.control).filter((control): control is TestControl => control !== undefined);
 
     const settingsKeys = Object.entries(new PluginSettings()).filter(([, value]) => typeof value === 'boolean' || typeof value === 'number').map(([key]) => key);
-    expect(definitions).toHaveLength(6);
+    expect(definitions).toHaveLength(7);
     expect(new Set(controls.map((control) => control.key))).toEqual(new Set(settingsKeys));
-    expect(definitions.map((definition) => definition.heading)).toContain('Hover Breadcrumb Popover Timeout');
+    expect(definitions.map((definition) => definition.heading)).toContain('Property Field Hover Breadcrumb Popover Timeout');
     for (const mode of ['Live Preview', 'Source', 'Reading']) {
       expect(items.map((item) => item.name)).toContain(`${mode} Mode Hover Breadcrumb Popover Timeout`);
     }
@@ -95,7 +95,11 @@ describe('NestedPropertiesPluginSettingTab', () => {
     expect(items.map((item) => item.name)).toContain('Static Tree Indentation Guides in Source Mode');
     const setHeading = vi.fn();
     items.find((item) => item.name === 'Property Field Hover Breadcrumb Activation Scope')?.render?.({ setHeading });
-    expect(setHeading).toHaveBeenCalledTimes(1);
+    items.find((item) => item.name === 'Property Field Hover Breadcrumb Navigation')?.render?.({ setHeading });
+    expect(setHeading).toHaveBeenCalledTimes(2);
+    for (const timing of ['Before', 'After']) {
+      expect(items.map((item) => item.name)).toContain(`Hover Over a Given Breadcrumb Property Field to Change the Screen Focus to the Corresponding Property Field in the Main UI ${timing} the Breadcrumb Popover Timeout`);
+    }
   });
 
   it('should make surface, feature, global, and remember controls genuinely superordinate', () => {
@@ -157,6 +161,8 @@ describe('NestedPropertiesPluginSettingTab', () => {
       const key of [
         'isPropertyFieldHoverBreadcrumbInLivePreviewEnabled',
         'isPropertyFieldHoverBreadcrumbInSourceModeEnabled',
+        'isPropertyFieldHoverBreadcrumbNavigateBeforeTimeoutEnabled',
+        'isPropertyFieldHoverBreadcrumbNavigateAfterTimeoutEnabled',
         'isPropertyFieldHoverBreadcrumbInReadingModeEnabled',
         'isPropertyFieldHoverBreadcrumbStaticTreeIndentationGuidesEnabled',
         'isFullPropertyFieldNameExpansionInHoverBreadcrumbEnabled',
@@ -171,6 +177,8 @@ describe('NestedPropertiesPluginSettingTab', () => {
       const key of [
         'isPropertyFieldHoverBreadcrumbInLivePreviewEnabled',
         'isPropertyFieldHoverBreadcrumbInSourceModeEnabled',
+        'isPropertyFieldHoverBreadcrumbNavigateBeforeTimeoutEnabled',
+        'isPropertyFieldHoverBreadcrumbNavigateAfterTimeoutEnabled',
         'isPropertyFieldHoverBreadcrumbInReadingModeEnabled',
         'isPropertyFieldHoverBreadcrumbStaticTreeIndentationGuidesEnabled',
         'isFullPropertyFieldNameExpansionInHoverBreadcrumbEnabled',

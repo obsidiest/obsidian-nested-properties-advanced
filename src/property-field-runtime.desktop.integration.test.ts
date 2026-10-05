@@ -142,6 +142,8 @@ beforeEach(async () => {
       await tab.setControlValue('isPropertyFieldThreadingEnabled', true);
       await tab.setControlValue('isPropertyFieldThreadingInMainUiEnabled', true);
       await tab.setControlValue('isPropertyFieldHoverBreadcrumbEnabled', true);
+      await tab.setControlValue('isPropertyFieldHoverBreadcrumbNavigateBeforeTimeoutEnabled', true);
+      await tab.setControlValue('isPropertyFieldHoverBreadcrumbNavigateAfterTimeoutEnabled', false);
       await tab.setControlValue('isFullWidthPropertyFieldHoverActivationEnabled', true);
       await tab.setControlValue('isGloballyControlHoverBreadcrumbTimeoutEnabled', true);
       await tab.setControlValue('globalHoverBreadcrumbPopoverTimeoutSeconds', 0.12);
@@ -757,7 +759,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
                 // Missed the clipped activation width of expanded parent keys.
                 const inputRect = isSourceMode ? undefined : keyInput?.getBoundingClientRect();
                 return inputRect === undefined
-? [rect.left + 8, rect.left + 24]
+                  ? [rect.left + 8, rect.left + 24]
                   : [rect.left + 8, (inputRect.left + inputRect.right) / 2, inputRect.right - 2];
               }
               return iconRect === undefined ? [] : [(iconRect.left + iconRect.right) / 2, iconRect.left + 2, iconRect.right - 2];
@@ -876,7 +878,7 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         }
         const doc = source.ownerDocument;
         const focusBeforeUndo = doc.activeElement?.className;
-        const scrollTop = scroller.scrollTop;
+        let scrollTop = scroller.scrollTop;
         let maximumScrollDelta = 0;
         function measureScroll(): void {
           maximumScrollDelta = Math.max(maximumScrollDelta, Math.abs(activeScroller.scrollTop - scrollTop));
@@ -887,6 +889,10 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
         await new Promise<void>((resolve) => {
           doc.defaultView?.setTimeout(resolve, 2500);
         });
+        measureScroll();
+        scroller.removeEventListener('scroll', measureScroll);
+        // Hover navigation now deliberately scrolls the note. Check history against
+        // The position before undo and the completed preview position before redo.
         if (focusTarget === 'breadcrumb') {
           const restored = [...source.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((candidate) => candidate.value === keyName);
           if (restored === undefined) {
@@ -905,6 +911,8 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
             doc.defaultView?.setTimeout(resolve, 180);
           });
         }
+        scrollTop = scroller.scrollTop;
+        scroller.addEventListener('scroll', measureScroll);
         const focusBeforeRedo = doc.activeElement?.className;
         pressKey({ key: 'y', modifiers: ['Ctrl'] });
         await new Promise<void>((resolve) => {
@@ -1051,5 +1059,128 @@ describe('Property interaction surfaces with Minimal and hidden titles', () => {
       vaultPath: vault.path
     });
     expect(isResult).toBe(true);
+  });
+});
+
+describe('breadcrumb hover navigation in native Obsidian editors', () => {
+  const navigationFixture = `---\nancestor:\n${Array.from({ length: 70 }, (_value, index) => `  filler${String(index)}: value`).join('\n')}\n  parent:\n    destination: value\n---\n\nBody\n`;
+  const cases = ['live-preview', 'source'].flatMap((mode) => [false, true].flatMap((before) => [false, true].map((after) => ({ after, before, escape: false, mode }))));
+  cases.push(...['live-preview', 'source'].map((mode) => ({ after: true, before: true, escape: true, mode })));
+  it.each(cases)('scrolls and retains the caret in $mode with before=$before after=$after Escape=$escape', async ({ after, before, escape, mode }) => {
+    const result = await evalInObsidian({
+      callback: async ({ app, context: { markdownView, nativeInput: { moveMouse, pressKey }, settingsTab }, fixture, isAfter, isBefore, isEscape, lib: { waitUntil }, modeName }) => {
+        const file = app.vault.getFileByPath('property-runtime.md');
+        if (file === null) {
+          throw new Error('Navigation fixture missing');
+        }
+        await app.vault.modify(file, fixture);
+        await markdownView.leaf.setViewState({ state: { file: file.path, mode: 'source', source: modeName === 'source' }, type: 'markdown' });
+        for (
+          const [key, value] of [
+            ['isPropertyFieldHoverBreadcrumbNavigateBeforeTimeoutEnabled', isBefore],
+            ['isPropertyFieldHoverBreadcrumbNavigateAfterTimeoutEnabled', isAfter],
+            ['isPropertyFieldThreadingEnabled', false],
+            ['globalHoverBreadcrumbPopoverTimeoutSeconds', 0.4]
+          ] as const
+        ) {
+          await settingsTab.setControlValue(key, value);
+        }
+        const root = markdownView.containerEl;
+        const doc = root.ownerDocument;
+        doc.win.electronWindow.focus();
+        await waitUntil({ predicate: () => doc.hasFocus() });
+        const scroller = root.querySelector<HTMLElement>('.cm-scroller');
+        if (scroller === null) {
+          throw new Error('Navigation scroll container missing');
+        }
+        await waitUntil({ predicate: () => markdownView.editor.getValue() === fixture });
+        const lines = fixture.split('\n');
+        const targetLine = lines.findIndex((line) => line.includes('destination:'));
+        markdownView.editor.setCursor({ ch: 1, line: lines.indexOf('Body') });
+        function findTarget(): HTMLElement | undefined {
+          return modeName === 'source'
+            ? [...root.querySelectorAll<HTMLElement>('.cm-line')].find((line) => line.textContent.includes('destination:'))
+            : [...root.querySelectorAll<HTMLInputElement>('.metadata-property-key-input')].find((input) => input.value === 'destination');
+        }
+        if (modeName === 'source') {
+          markdownView.editor.scrollIntoView({ from: { ch: 0, line: targetLine }, to: { ch: 0, line: targetLine } }, true);
+        } else {
+          await waitUntil({ message: 'Nested destination did not render', predicate: () => findTarget() !== undefined });
+          findTarget()?.scrollIntoView({ block: 'center' });
+        }
+        await waitUntil({
+          message: 'Destination did not enter the scrolled viewport',
+          predicate: () => {
+            const rect = findTarget()?.getBoundingClientRect();
+            const viewport = scroller.getBoundingClientRect();
+            return rect !== undefined && rect.top >= viewport.top && rect.bottom <= viewport.bottom && scroller.scrollTop > 100;
+          }
+        });
+        // Let CodeMirror finish its viewport measurement before capturing the baseline.
+        async function settle(): Promise<void> {
+          for (let frame = 0; frame < 3; frame++) {
+            await new Promise<void>((resolve) => {
+              doc.win.requestAnimationFrame(() => {
+                resolve();
+              });
+            });
+          }
+        }
+        await settle();
+        const caret = markdownView.editor.getCursor();
+        const initialScroll = scroller.scrollTop;
+        const rect = findTarget()?.getBoundingClientRect();
+        if (rect === undefined) {
+          throw new Error('Destination vanished before hover');
+        }
+        moveMouse({ x: rect.left + Math.min(rect.width / 2, 80), y: (rect.top + rect.bottom) / 2 });
+        await waitUntil({ message: 'Native hover did not open destination breadcrumb', predicate: () => doc.querySelector('.np-property-breadcrumb-popover')?.textContent.includes('destination') === true });
+        const popup = doc.querySelector<HTMLElement>('.np-property-breadcrumb-popover');
+        const ancestor = [...(popup?.querySelectorAll<HTMLElement>('.np-property-breadcrumb-key') ?? [])].find((button) => button.textContent === 'ancestor');
+        if (ancestor === undefined) {
+          throw new Error('Ancestor breadcrumb missing');
+        }
+        const ancestorRect = ancestor.getBoundingClientRect();
+        moveMouse({ x: (ancestorRect.left + ancestorRect.right) / 2, y: (ancestorRect.top + ancestorRect.bottom) / 2 });
+        if (isBefore) {
+          await waitUntil({ message: 'Hovered ancestor did not scroll into view', predicate: () => initialScroll - scroller.scrollTop > 100 });
+        }
+        await settle();
+        const previewScroll = scroller.scrollTop;
+        const caretDuringPreview = markdownView.editor.getCursor();
+        const isRetainedPopover = popup?.isConnected === true;
+        if (isEscape) {
+          pressKey({ key: 'Escape' });
+        } else {
+          const tabRect = markdownView.leaf.tabHeaderEl.getBoundingClientRect();
+          moveMouse({ x: (tabRect.left + tabRect.right) / 2, y: (tabRect.top + tabRect.bottom) / 2 });
+        }
+        await waitUntil({ message: 'Breadcrumb did not dismiss', predicate: () => doc.querySelector('.np-property-breadcrumb-popover') === null });
+        await settle();
+        const finalScroll = scroller.scrollTop;
+        const caretAfter = markdownView.editor.getCursor();
+        const isUnchanged = markdownView.editor.getValue() === fixture;
+        await settingsTab.setControlValue('isPropertyFieldHoverBreadcrumbNavigateBeforeTimeoutEnabled', true);
+        await settingsTab.setControlValue('isPropertyFieldHoverBreadcrumbNavigateAfterTimeoutEnabled', false);
+        return { caret, caretAfter, caretDuringPreview, finalScroll, initialScroll, previewScroll, retainedPopover: isRetainedPopover, unchanged: isUnchanged };
+      },
+      contextId,
+      input: { fixture: navigationFixture, isAfter: after, isBefore: before, isEscape: escape, modeName: mode },
+      vaultPath: vault.path
+    });
+    expect(result.retainedPopover).toBe(true);
+    expect(result.unchanged).toBe(true);
+    expect(result.caretDuringPreview).toEqual(result.caret);
+    expect(result.caretAfter).toEqual(result.caret);
+    if (before) {
+      expect(result.initialScroll - result.previewScroll).toBeGreaterThan(100);
+    } else {
+      expect(Math.abs(result.initialScroll - result.previewScroll)).toBeLessThan(3);
+    }
+    if (after && !escape) {
+      expect(result.initialScroll - result.finalScroll).toBeGreaterThan(100);
+    } else {
+      expect(Math.abs(result.initialScroll - result.finalScroll)).toBeLessThan(3);
+    }
   });
 });

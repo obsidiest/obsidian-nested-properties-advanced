@@ -22,6 +22,7 @@
     "frontmatter",
     "GHSA",
     "Invocables",
+    "kepano",
     "linkinator",
     "logseq",
     "mnaoumov",
@@ -31,7 +32,10 @@
     "obsidiest",
     "obsidianmd",
     "offref",
+    "Pickr",
+    "popout",
     "Promisable",
+    "retarget",
     "subkey",
     "subfeature",
     "subfeatures",
@@ -41,7 +45,8 @@
     "unsets",
     "unstub",
     "unvalidated",
-    "wdio"
+    "wdio",
+    "wikilink"
   ],
   "ignoreWords": [],
   "import": [],

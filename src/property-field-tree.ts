@@ -1,5 +1,7 @@
 /* eslint-disable @typescript-eslint/array-type, @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-unnecessary-condition, @typescript-eslint/prefer-nullish-coalescing, complexity, func-style, no-magic-numbers, no-restricted-syntax, perfectionist/sort-modules, perfectionist/sort-union-types, prefer-named-capture-group, unicorn/prefer-single-call, unicorn/prefer-spread -- YAML property trees require ordered stack mutations and compact parser result shapes; these local exceptions keep that algorithm legible. */
 
+import { parseYaml } from 'obsidian';
+
 import { findSourceMappingColon } from './source-property-key.ts';
 
 export interface PropertyFieldNode {
@@ -244,7 +246,12 @@ function parseMapping(content: string): null | { column: number; hasNestedValue:
 
 function unquote(value: string): string {
   if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\'')))) {
-    return value.slice(1, -1);
+    try {
+      const decoded: unknown = parseYaml(value);
+      return typeof decoded === 'string' ? decoded : value.slice(1, -1);
+    } catch {
+      return value.slice(1, -1);
+    }
   }
   return value;
 }

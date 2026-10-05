@@ -1,4 +1,7 @@
+import type { App } from 'obsidian';
+
 import { noopAsync } from 'obsidian-dev-utils/function';
+import { castTo } from 'obsidian-dev-utils/object-utils';
 import {
   describe,
   expect,
@@ -165,5 +168,37 @@ describe('Style Settings precision controls', () => {
     queryAllSpy.mockRestore();
     heading.remove();
     container.remove();
+  });
+});
+
+describe('Style Settings in auxiliary Settings windows', () => {
+  it('should observe the tab after native adoption and release its window and method on unload', () => {
+    const frame = document.body.createEl('iframe');
+    const settingsDocument = frame.contentDocument;
+    if (settingsDocument === null) {
+      throw new Error('Missing Settings window fixture');
+    }
+    type SettingsHost = Pick<App['setting'], 'activeTab' | 'openTab'>;
+    const nativeOpenTab = vi.fn((tab: Parameters<SettingsHost['openTab']>[0]): void => {
+      settingsDocument.body.append(tab.containerEl);
+    });
+    const settings = castTo<SettingsHost>({ activeTab: null, openTab: nativeOpenTab });
+    const tab = castTo<Parameters<SettingsHost['openTab']>[0]>({ containerEl: createDiv() });
+    const controls = new StyleSettingsPrecisionControls();
+    const observe = vi.spyOn(controls, 'observeDocument');
+    const remove = vi.spyOn(controls, 'removeDocument');
+    try {
+      controls.start([document], settings);
+      settings.openTab(tab);
+      expect(nativeOpenTab).toHaveBeenCalledWith(tab);
+      expect(observe).toHaveBeenCalledWith(settingsDocument);
+      const win = settingsDocument.defaultView;
+      win?.dispatchEvent(new Event('unload'));
+      expect(remove).toHaveBeenCalledWith(settingsDocument);
+    } finally {
+      controls.stop();
+      frame.remove();
+    }
+    expect(settings.openTab).toBe(nativeOpenTab);
   });
 });

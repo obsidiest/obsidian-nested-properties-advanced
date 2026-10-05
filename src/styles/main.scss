@@ -1358,3 +1358,81 @@ settings:
     step: 0.5
     format: px
 */
+
+.np-style-color-original { display: none !important; }
+.np-style-color-controls, .np-color-dialog-fields, .np-color-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.np-style-color-swatch::before {
+  content: "";
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+  border-radius: 3px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--np-chosen-color);
+}
+.np-color-dialog {
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l, 12px);
+  padding: 24px;
+  max-width: min(480px, calc(100vw - 32px));
+}
+.np-color-dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
+.np-color-dialog-fields input[type="text"] { min-width: 0; flex: 1; }
+.np-color-dialog-fields input[type="color"] { width: 48px; height: 32px; padding: 2px; }
+.np-color-dialog-status { min-height: 1.5em; margin-block: 8px; }
+.np-color-dialog-actions { justify-content: flex-end; }
+
+.np-rich-property-holder { position: relative; }
+.np-rich-property-raw {
+  position: absolute !important;
+  inset: 0;
+  width: 100%;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.np-rich-property-label {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.metadata-property-key:has(> .np-rich-property-label:not([hidden])) {
+  // Keep fixed-height property icons centered beside taller SVGs and wrapped labels.
+  align-items: center;
+}
+.metadata-property-key > .np-rich-property-label {
+  // Use the native input's typography and inset instead of inheriting note text sizing.
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: var(--input-height);
+  padding: var(--metadata-input-padding);
+  color: var(--metadata-label-text-color);
+  font-size: var(--metadata-label-font-size);
+  font-weight: var(--metadata-label-font-weight);
+  line-height: normal;
+}
+.np-rich-property-label[hidden] { display: none; }
+.np-rich-content > :first-child { margin-top: 0; }
+.np-rich-content > :last-child { margin-bottom: 0; }
+.np-rich-content p { margin-block: 0; }
+.np-rich-content svg { vertical-align: middle; max-width: 100%; }
+.np-rich-content img { max-width: 100%; vertical-align: middle; }
+.np-rich-source-property {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+  white-space: normal;
+  cursor: text;
+}
+.np-property-breadcrumb-label { display: block; min-width: 0; }

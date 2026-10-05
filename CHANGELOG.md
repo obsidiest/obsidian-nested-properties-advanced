@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 2.1.0 (in development)
+
+- fix: preserve native property-key padding beside icons for rendered LaTeX, SVG and Markdown labels, including theme and snippet overrides
+
+- fix: enhance Style Settings color and precision controls in Obsidian 1.13 Settings windows, including window closure and plugin reload cleanup
+
+- feat: add before-timeout scroll previews and optional after-timeout breadcrumb navigation, adapted from List Tree Indentation Guides 2.0.2, with Escape cancellation and unchanged hover caret position
+- feat: rename the timeout section to Property Field Hover Breadcrumb Popover Timeout
+- fix: map Source key-only hover regions through CodeMirror when rich rendering changes the displayed text length
+
+- feat: render LaTeX, SVG, Markdown formatting and links in property keys, text values, and hover breadcrumbs through Obsidian's renderer
+- feat: add default-enabled global and Live Preview, Source, and Reading property rendering controls
+- feat: preserve native property editing and source YAML while showing rendered content outside the focused field/selected Source line
+- fix: decode quoted YAML keys before rendering breadcrumb and Source labels
+- feat: adapt List Tree Indentation Guides 2.0.2 themed color dialogs for all 18 themed colors, retaining existing Style Settings keys, per-theme defaults, alpha, retryable errors, and save completion behavior
+
 ## 2.0.0
 
 - fix: cancel Live Preview root-key drafts against the current metadata entry so Escape preserves an Enter-committed rename after metadata refresh

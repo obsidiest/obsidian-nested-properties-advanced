@@ -11,7 +11,9 @@ import { NestedPropertiesPluginSettingTab } from './plugin-setting-tab.ts';
 import { PluginSettingsComponent } from './plugin-settings-component.ts';
 import { PluginSettings } from './plugin-settings.ts';
 import { PropertyFieldVisualsComponent } from './property-field-visuals.ts';
+import { RichPropertyRenderingComponent } from './rich-property-rendering.ts';
 import { RootPropertyKeyEditingComponent } from './root-property-key-editing.ts';
+import { styleSettingsColorStore } from './style-settings-colors.ts';
 import { StyleSettingsPrecisionControls } from './style-settings-precision.ts';
 
 export class Plugin extends PluginBase {
@@ -32,6 +34,8 @@ export class Plugin extends PluginBase {
     await pluginSettingsComponent.loadWithPromises();
 
     this.addChild(new RootPropertyKeyEditingComponent({ app: this.app }));
+    const richPropertyRendering = this.addChild(new RichPropertyRenderingComponent(this.app, pluginSettingsComponent));
+    this.registerEditorExtension(richPropertyRendering.createEditorExtension());
 
     const nestedPropertyRendererComponent = this.addChild(
       new NestedPropertyRendererComponent({
@@ -54,18 +58,25 @@ export class Plugin extends PluginBase {
             nestedPropertyRendererComponent.refreshSettings(key, value);
           }
           propertyFieldVisualsComponent.refresh();
+          richPropertyRendering.refresh();
         },
         plugin: this,
         pluginSettingsComponent
       })
     );
 
-    const styleSettingsPrecisionControls = new StyleSettingsPrecisionControls();
+    const styleSettingsPrecisionControls = new StyleSettingsPrecisionControls(() => styleSettingsColorStore(this.app));
     this.app.workspace.onLayoutReady(() => {
-      styleSettingsPrecisionControls.start([...getAllDomWindows(this.app)].map((win) => win.document));
+      styleSettingsPrecisionControls.start([...getAllDomWindows(this.app)].map((win) => win.document), this.app.setting);
     });
     this.registerEvent(this.app.workspace.on('window-open', (_workspaceWindow, openedWindow) => {
       styleSettingsPrecisionControls.observeDocument(openedWindow.document);
+    }));
+    this.registerEvent(this.app.workspace.on('window-close', (_workspaceWindow, closedWindow) => {
+      styleSettingsPrecisionControls.removeDocument(closedWindow.document);
+    }));
+    this.registerEvent(this.app.workspace.on('css-change', () => {
+      styleSettingsPrecisionControls.refreshColors();
     }));
     this.register(() => {
       styleSettingsPrecisionControls.stop();

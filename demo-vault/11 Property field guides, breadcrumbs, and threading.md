@@ -29,16 +29,25 @@ This note's own properties form several nested branches. Use them to try the vis
 
 Static main-UI and breadcrumb guides and the hover breadcrumb are enabled by default. The threading master switch remains disabled by default, so threading is opt-in. **Highlight Active Property Field Tree** is also opt-in and has its own Style Settings controls.
 
-Under **Hover Breadcrumb Popover Timeout**, all four numerical settings default to **0.01 seconds**. The individual options are named **Live Preview Mode Hover Breadcrumb Popover Timeout**, **Source Mode Hover Breadcrumb Popover Timeout**, and **Reading Mode Hover Breadcrumb Popover Timeout**. Existing saved values remain in effect.
+Under **Property Field Hover Breadcrumb Popover Timeout**, all four numerical settings default to **0.01 seconds**. The individual options are named **Live Preview Mode Hover Breadcrumb Popover Timeout**, **Source Mode Hover Breadcrumb Popover Timeout**, and **Reading Mode Hover Breadcrumb Popover Timeout**. Existing saved values remain in effect.
 
-## Hover Breadcrumb Popover Timeout
+## Property Field Hover Breadcrumb Popover Timeout
 
 The fold-gutter area before every Source property activates a breadcrumb under all four combinations of the two activation-scope switches. Compare the parent `project` with the leaf `name`, including when both switches are disabled.
 
-1. In the **Hover Breadcrumb Popover Timeout** settings section, leave **Globally Control Hover Breadcrumb Timeout** enabled and set **Global Hover Breadcrumb Popover Timeout** to `2.5` seconds. Open a breadcrumb, move through the gap into it, and click an ancestor to navigate. Moving entirely away should close it after the configured delay.
+1. In the **Property Field Hover Breadcrumb Popover Timeout** settings section, leave **Globally Control Hover Breadcrumb Timeout** enabled and set **Global Hover Breadcrumb Popover Timeout** to `2.5` seconds. Open a breadcrumb, move through the gap into it, and click an ancestor to navigate. Moving entirely away should close it after the configured delay.
 2. Enable **Control Source Mode Hover Breadcrumb Timeout Individually** and set **Source Mode** to `4` seconds. Source now uses four seconds while Live Preview and Reading retain the global value.
 3. Enable **Control Live Preview Mode Hover Breadcrumb Timeout Individually** and **Control Reading Mode Hover Breadcrumb Timeout Individually**, and enter distinct values in **Live Preview Mode** and **Reading Mode**. Each enabled individual control overrides the global setting, even when global control remains enabled.
-4. Disable global control and all three individual controls to try the built-in one-second delay. Re-enable global control to return to your saved global value. Zero means immediate dismissal; decimal seconds are supported. Reload the plugin to check that your values persist.
+4. Disable global control and all three individual controls to try the built-in 0.01-second delay. Re-enable global control to return to your saved global value. Zero means immediate dismissal; decimal seconds are supported. Reload the plugin to check that your values persist.
+
+## Property Field Hover Breadcrumb Navigation
+
+In **Property Field Hover Breadcrumb**, the **Property Field Hover Breadcrumb Navigation** subsection provides two independent switches. Both use the existing timeout controls and work in Live Preview, Source, and Reading modes.
+
+- **Hover Over a Given Breadcrumb Property Field to Change the Screen Focus to the Corresponding Property Field in the Main UI Before the Breadcrumb Popover Timeout** defaults to **enabled**. Hovering or keyboard-focusing a breadcrumb scrolls its property into view without moving the editor caret. Closing the popover restores the previous scroll position unless the after-timeout switch is enabled.
+- **Hover Over a Given Breadcrumb Property Field to Change the Screen Focus to the Corresponding Property Field in the Main UI After the Breadcrumb Popover Timeout** defaults to **disabled**. When enabled, timeout keeps or applies the last hovered destination. Escape cancels it and restores any preview. Clicking always commits navigation and places the caret at the key's end in editing modes.
+
+To compare all four combinations, use a long property tree and hover a descendant's breadcrumb ancestor. With only the before-timeout switch enabled, the ancestor appears immediately and the previous view returns after timeout. With only after-timeout enabled, scrolling waits until timeout. With both enabled, the immediate preview remains after timeout. With both disabled, hovering does not scroll. Escape cancels each uncommitted preview; editing the note or switching its mode discards stale navigation.
 
 ## Settings coverage
 
@@ -65,6 +74,8 @@ The plugin's searchable settings page exposes the switches and numeric controls 
 - `isPropertyFieldHoverBreadcrumbInLivePreviewEnabled`
 - `isPropertyFieldHoverBreadcrumbInSourceModeEnabled`
 - `isPropertyFieldHoverBreadcrumbInReadingModeEnabled`
+- `isPropertyFieldHoverBreadcrumbNavigateBeforeTimeoutEnabled`
+- `isPropertyFieldHoverBreadcrumbNavigateAfterTimeoutEnabled`
 - `isPropertyFieldHoverBreadcrumbStaticTreeIndentationGuidesEnabled`
 - `isGloballyControlHoverBreadcrumbTimeoutEnabled`
 - `globalHoverBreadcrumbPopoverTimeoutSeconds`
